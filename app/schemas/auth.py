@@ -51,3 +51,29 @@ class GoogleStartOut(BaseModel):
 
 class AccountRename(BaseModel):
     name: str
+
+# --- responses & extra request models for verification flow ---
+
+class SignupResponse(BaseModel):
+    ok: bool = True
+    message: str = "Verification email sent. Please check your inbox."
+
+class VerifyResponse(BaseModel):
+    verified: bool
+    message: str
+
+class ResendBody(BaseModel):
+    email: EmailStr = Field(..., description="User's email (username).")
+
+class MessageResponse(BaseModel):
+    ok: bool = True
+    message: str
+
+class PasswordForgotBody(BaseModel):
+    email: EmailStr = Field(..., description="Account email (username).")
+
+class PasswordResetBody(BaseModel):
+    token: str = Field(..., description="Raw reset token from email link.")
+    new_password: str = Field(..., min_length=6, description="New password (min 6 chars).")
+
+

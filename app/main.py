@@ -20,8 +20,8 @@ app.add_middleware(
 
 # Routers
 app.include_router(auth_router)
-app.include_router(accounts_router)
-app.include_router(schemas_router)
+#app.include_router(accounts_router)
+#app.include_router(schemas_router)
 
 @app.get("/health")
 def health():

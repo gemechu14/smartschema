@@ -29,8 +29,8 @@ class User(Base):
     password_hash = Column(String(255), nullable=True)
     google_sub = Column(String(128), nullable=True, unique=True)
     is_active = Column(Boolean, default=False, nullable=False)
-    email_verified_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    email_verified_at = Column(DateTime(timezone=True), nullable=True)  # <- add timezone=True
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)  # optional
 
     memberships = relationship("Membership", back_populates="user", cascade="all, delete-orphan")
 

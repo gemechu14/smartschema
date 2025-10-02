@@ -7,6 +7,7 @@ import jwt
 from app.api.deps import get_db
 from app.core.config import settings
 from app.core.security import decode_jwt
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.models.auth_models import User, Account, Membership, Role
 
 def get_authorization_header(authorization: Optional[str] = Header(default=None)):
@@ -14,18 +15,33 @@ def get_authorization_header(authorization: Optional[str] = Header(default=None)
         raise HTTPException(401, "Missing or invalid Authorization header")
     return authorization.split(" ", 1)[1].strip()
 
-def current_user(db: Session = Depends(get_db), token: str = Depends(get_authorization_header)) -> User:
+bearer = HTTPBearer(auto_error=False)
+def current_user(
+    creds: HTTPAuthorizationCredentials = Depends(bearer),
+    db: Session = Depends(get_db),
+) -> User:
+    if not creds or creds.scheme.lower() != "bearer":
+        # Missing header or wrong scheme
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+
     try:
-        payload = decode_jwt(token)
-    except jwt.PyJWTError:
-        raise HTTPException(401, "Invalid token")
-    sub = payload.get("sub")
-    if not sub:
-        raise HTTPException(401, "Invalid token")
-    user = db.get(User, UUID(sub))
-    if not user or not user.is_active:
-        raise HTTPException(401, "Inactive user")
-    return user
+        payload = decode_jwt(creds.credentials)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        if not (user.is_active and user.email_verified_at):
+            # Block unverified/inactive users explicitly
+            raise HTTPException(status_code=403, detail="User is not active or not verified")
+
+        return user
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 def current_account_id(token: str = Depends(get_authorization_header)) -> UUID:
     payload = decode_jwt(token)

@@ -9,6 +9,8 @@ from app.db.base import Base  # the shared Declarative Base
 # --- import all your model modules (side-effect: tables register on Base.metadata)
 from app.models import schema_spec  # noqa
 from app.models import auth_models  # noqa
+from app.models import verification
+from app.models import password_reset 
 # from app.models import projects  # <- add new modules like this
 
 # expose for Alembic

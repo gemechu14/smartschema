@@ -4,11 +4,18 @@ import hashlib, hmac, os, re, base64, secrets
 import jwt
 from passlib.context import CryptContext
 from app.core.config import settings
+from datetime import timezone as _tz, datetime as _dt
 
 pwd_ctx = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 ALGO = "HS256"
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+
+def ensure_aware(dt: _dt) -> _dt:
+    """Return a timezone-aware UTC datetime. If naive, assume UTC."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
 
 def hash_password(p: str) -> str:
     # No length truncation required
