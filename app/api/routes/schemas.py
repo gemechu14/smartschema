@@ -1,69 +1,234 @@
-from typing import List
+from typing import List, Optional
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.api.deps import get_db
+
+from app.api.deps_auth import get_db, require_role_for_account  # <-- path-only dep
+from app.models.auth_models import Role, Membership
 from app.models.schema_spec import SchemaSpecification
 from app.schemas.schema_spec import SchemaSpecCreate, SchemaSpecRead, SchemaSpecUpdate
 from app.services.schema_inference import infer_from_file, infer_from_sql
 
-router = APIRouter(prefix="/schemas", tags=["schemas"])
+router = APIRouter(prefix="/accounts/{account_id}/schemas", tags=["schemas"])
 
-def _next_default_name(db: Session) -> str:
-    cnt = db.query(func.count(SchemaSpecification.id)).scalar() or 0
+
+def _next_default_name(db: Session, account_id: UUID) -> str:
+    """Generate a per-account default name like 'Schema 3'."""
+    cnt = (
+        db.query(func.count(SchemaSpecification.id))
+        .filter(SchemaSpecification.account_id == account_id)
+        .scalar()
+        or 0
+    )
     return f"Schema {cnt + 1}"
 
-@router.post("", response_model=SchemaSpecRead)
-def create_schema(body: SchemaSpecCreate, db: Session = Depends(get_db)):
-    name = body.schema_name or _next_default_name(db)
+
+# ------------------------- CREATE -------------------------
+@router.post(
+    "",
+    response_model=SchemaSpecRead,
+    summary="Create schema (Owner/Admin only)",
+    description="""
+Create a schema under the account identified by the path parameter.
+Only **OWNER** or **ADMIN** can create schemas. The new schema is stamped with the account and creator.
+""",
+)
+def create_schema(
+    account_id: UUID,
+    body: SchemaSpecCreate,
+    tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN})),
+    db: Session = Depends(get_db),
+):
+    user, _aid, _role = tup
+    name = body.schema_name or _next_default_name(db, account_id)
     obj = SchemaSpecification(
         schema_name=name,
-        schema=body.schema.model_dump(),
-        validators=body.validators
+        schema=body.schema_body.model_dump(),
+        validators=body.validators,
+        account_id=account_id,            # stamp account
+        created_by_user_id=user.id,       # stamp creator
     )
     db.add(obj)
     db.commit()
     db.refresh(obj)
     return obj
 
-@router.get("", response_model=List[SchemaSpecRead])
-def list_schemas(db: Session = Depends(get_db)):
-    return db.query(SchemaSpecification).order_by(SchemaSpecification.created_at.desc()).all()
 
-@router.get("/{schema_id}", response_model=SchemaSpecRead)
-def get_schema(schema_id: UUID, db: Session = Depends(get_db)):
-    obj = db.get(SchemaSpecification, schema_id)
+# ------------------------- LIST -------------------------
+@router.get(
+    "",
+    response_model=List[SchemaSpecRead],
+    summary="List schemas in account (visibility-aware)",
+    description="""
+Returns schemas for the account identified by the path parameter.
+
+- **OWNER/ADMIN**: see all schemas.
+- **MEMBER/VIEWER**: see only schemas explicitly granted in their `manage_schema_ids`.
+"""
+)
+def list_schemas(
+    account_id: UUID,
+    tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN, Role.MEMBER, Role.VIEWER})),
+    db: Session = Depends(get_db),
+):
+    user, _aid, role = tup
+
+    q = db.query(SchemaSpecification).filter(SchemaSpecification.account_id == account_id)
+
+    if role in {Role.OWNER, Role.ADMIN}:
+        return q.order_by(SchemaSpecification.created_at.desc()).all()
+
+    # member/viewer: restrict to allowed schema ids
+    mem = (
+        db.query(Membership)
+        .filter(Membership.account_id == account_id, Membership.user_id == user.id)
+        .first()
+    )
+    raw_ids = mem.manage_schema_ids or []
+    allowed_ids: list[UUID] = []
+    for x in raw_ids:
+        try:
+            allowed_ids.append(UUID(str(x)))
+        except Exception:
+            continue
+
+    if not allowed_ids:
+        return []
+
+    return (
+        q.filter(SchemaSpecification.id.in_(allowed_ids))
+         .order_by(SchemaSpecification.created_at.desc())
+         .all()
+    )
+
+
+
+# ------------------------- GET ONE -------------------------
+@router.get(
+    "/{schema_id}",
+    response_model=SchemaSpecRead,
+    summary="Get schema by id (visibility-aware)",
+    description="""
+Fetch a single schema by id, scoped to the account in the path.
+
+- **OWNER/ADMIN**: can view any schema in the account.
+- **MEMBER/VIEWER**: can view only if the schema is in their `manage_schema_ids`.
+
+Returns **404** if not found or not visible to the caller.
+"""
+)
+def get_schema(
+    account_id: UUID,
+    schema_id: UUID,
+    tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN, Role.MEMBER, Role.VIEWER})),
+    db: Session = Depends(get_db),
+):
+    user, _aid, role = tup
+
+    # Try fetch within account first
+    obj = (
+        db.query(SchemaSpecification)
+        .filter(SchemaSpecification.id == schema_id, SchemaSpecification.account_id == account_id)
+        .first()
+    )
     if not obj:
+        # Do not leak whether it exists in another account
         raise HTTPException(404, "Schema not found")
+
+    if role in {Role.OWNER, Role.ADMIN}:
+        return obj
+
+    # member/viewer: check visibility
+    mem = (
+        db.query(Membership)
+        .filter(Membership.account_id == account_id, Membership.user_id == user.id)
+        .first()
+    )
+    raw_ids = mem.manage_schema_ids or []
+    allowed = {str(UUID(str(x))) for x in raw_ids if str(x)}
+    if str(obj.id) not in allowed:
+        # Hide existence to avoid enumeration
+        raise HTTPException(404, "Schema not found")
+
     return obj
 
-@router.put("/{schema_id}", response_model=SchemaSpecRead)
-def update_schema(schema_id: UUID, body: SchemaSpecUpdate, db: Session = Depends(get_db)):
-    obj = db.get(SchemaSpecification, schema_id)
+
+
+# ------------------------- UPDATE -------------------------
+@router.put(
+    "/{schema_id}",
+    response_model=SchemaSpecRead,
+    summary="Update schema (Owner/Admin only)",
+    description="Update a schema in the account identified by the path parameter. Only **OWNER** or **ADMIN** may update.",
+)
+def update_schema(
+    account_id: UUID,
+    schema_id: UUID,
+    body: SchemaSpecUpdate,
+    tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN})),
+    db: Session = Depends(get_db),
+):
+    obj = (
+        db.query(SchemaSpecification)
+        .filter(SchemaSpecification.id == schema_id, SchemaSpecification.account_id == account_id)
+        .first()
+    )
     if not obj:
         raise HTTPException(404, "Schema not found")
+
     if body.schema_name is not None:
         obj.schema_name = body.schema_name
-    if body.schema is not None:
-        obj.schema = body.schema.model_dump()
+    if body.schema_body is not None:
+        obj.schema = body.schema_body.model_dump()
     if body.validators is not None:
         obj.validators = body.validators
+
     db.commit()
     db.refresh(obj)
     return obj
 
-@router.delete("/{schema_id}", status_code=204)
-def delete_schema(schema_id: UUID, db: Session = Depends(get_db)):
-    obj = db.get(SchemaSpecification, schema_id)
+
+# ------------------------- DELETE -------------------------
+@router.delete(
+    "/{schema_id}",
+    status_code=204,
+    summary="Delete schema (Owner/Admin only)",
+    description="Delete a schema in the account identified by the path parameter. Only **OWNER** or **ADMIN** may delete.",
+)
+def delete_schema(
+    account_id: UUID,
+    schema_id: UUID,
+    tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN})),
+    db: Session = Depends(get_db),
+):
+    obj = (
+        db.query(SchemaSpecification)
+        .filter(SchemaSpecification.id == schema_id, SchemaSpecification.account_id == account_id)
+        .first()
+    )
     if not obj:
         raise HTTPException(404, "Schema not found")
+
     db.delete(obj)
     db.commit()
     return
 
-@router.post("/import", response_model=List[SchemaSpecRead])
+
+# ------------------------- IMPORT -------------------------
+@router.post(
+    "/import",
+    response_model=List[SchemaSpecRead],
+    summary="Import schemas from file/SQL (Owner/Admin only)",
+    description="""
+Parse a file (csv/excel/pdf/json/sql) and create one or more schemas for this account.
+Requires **OWNER/ADMIN**. For CSV/Excel, `header_row` is required (0-based). For Excel, you can pass `sheets`
+and `sheet_header_rows` to control per-sheet parsing.
+""",
+)
 async def import_schema(
+    account_id: UUID,
     file: UploadFile = File(...),
     source_type: str | None = Query(default=None, description="csv|excel|pdf|sql|json"),
     header_row: int | None = Query(
@@ -79,8 +244,11 @@ async def import_schema(
         default=None,
         description="(excel only) Comma-separated integers matching 'sheets' to override header_row per sheet."
     ),
+    tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN})),
     db: Session = Depends(get_db),
 ):
+    user, _aid, _role = tup
+
     raw = await file.read()
     st = (source_type or "").lower()
 
@@ -125,11 +293,17 @@ async def import_schema(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
 
-    created = []
+    created: List[SchemaSpecification] = []
     for item in inferred:
         name_hint = item.get("__source_sheet__") or item.get("__source_table__")
-        schema_name = name_hint or _next_default_name(db)
-        obj = SchemaSpecification(schema_name=schema_name, schema=item["schema"], validators=item["validators"])
+        schema_name = name_hint or _next_default_name(db, account_id)
+        obj = SchemaSpecification(
+            schema_name=schema_name,
+            schema=item["schema"],
+            validators=item.get("validators", {}),
+            account_id=account_id,          # stamp account
+            created_by_user_id=user.id,     # stamp creator
+        )
         db.add(obj)
         db.commit()
         db.refresh(obj)

@@ -18,7 +18,7 @@ from app.models.verification import EmailVerification
 from app.models.password_reset import PasswordReset
 from app.api.routes.auth_utils import issue_password_reset
 
-from app.schemas.auth import PasswordForgotBody, PasswordResetBody, MessageResponse
+from app.schemas.auth import MembershipOut, PasswordForgotBody, PasswordResetBody, MessageResponse, RoleEnum
 from app.api.routes.auth_utils import issue_email_verification
 from app.schemas.auth import (
     SignupBody, SignupResponse, VerifyResponse,
@@ -143,7 +143,7 @@ def signup(body: SignupBody, db: Session = Depends(get_db)):
     role = Role.MEMBER
     if body.invite:
         inv = db.query(Invitation).filter(Invitation.token_hash == sha256(body.invite)).first()
-        if inv and inv.accepted_at is None and inv.expires_at > now_utc():
+        if inv and inv.accepted_at is None and ensure_aware(inv.expires_at) > now_utc():
             account_id = inv.account_id
             role = inv.role
             inv.accepted_at = now_utc()
@@ -158,6 +158,13 @@ def signup(body: SignupBody, db: Session = Depends(get_db)):
     else:
         db.add(Membership(account_id=account_id, user_id=user.id, role=role))
 
+    if body.invite and inv and inv.manage_schema_ids:
+        mem = db.query(Membership).filter(
+            Membership.account_id == account_id,
+            Membership.user_id == user.id
+        ).first()
+        if mem:
+            mem.manage_schema_ids = inv.manage_schema_ids
     # Send verification
     try:
         issue_email_verification(db, user.id, email, first_name)
@@ -258,27 +265,49 @@ def logout(refresh_token: str, db: Session = Depends(get_db)):
         db.commit()
     return {"ok": True}
 
+
+
 @router.get(
     "/me",
     response_model=Me,
     summary="Return the current authenticated user",
     description="""
-Returns the profile of the currently logged-in user, based on the **access token** provided in the 
-`Authorization: Bearer <token>` header.
+Returns the profile of the currently logged-in user **and their account memberships**.
 
-- Requires a valid **access token** (not a refresh token).
-- If the token is missing, invalid, expired, or belongs to an inactive/unverified user, 
-  the request will return `401 Unauthorized` or `403 Forbidden`.
-- If valid, you get the user details: `id`, `email`, `first_name`, `last_name`, and `is_active`.
-
-This is useful for:
-- Checking if the user is logged in.
-- Displaying the logged-in user's profile in the frontend.
+- Requires a valid **access token** in the `Authorization: Bearer <token>` header.
+- If the token is missing, invalid, expired, or belongs to an inactive/unverified user, you'll get `401` or `403`.
+- Response includes user fields plus a list of memberships (`account_id`, `role`, `account_name`).
 """
 )
-def me(user = Depends(current_user)):
-    # Pydantic v2: model_validate ensures safe serialization from ORM
-    return Me.model_validate(user)
+def me(user = Depends(current_user), db: Session = Depends(get_db)):
+    # Query memberships joined with account for display name
+    rows = (
+        db.query(Membership, Account)
+        .join(Account, Account.id == Membership.account_id)
+        .filter(Membership.user_id == user.id)
+        .all()
+    )
+
+    # Build DTOs explicitly (don't return ORM rows)
+    memberships = [
+        MembershipOut(
+            account_id=acc.id,
+            role=RoleEnum(m.role.name) if hasattr(m.role, "name") else RoleEnum(m.role),
+            account_name=acc.name,
+        )
+        for (m, acc) in rows
+    ]
+
+    # Return Me DTO with memberships
+    return Me(
+        id=user.id,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        is_active=user.is_active,
+        memberships=memberships,
+    )
+
 
 
 # ---- Google (skeleton; wire later) ----
@@ -438,6 +467,14 @@ def google_callback(
         if not exists:
             db.add(Membership(account_id=inv.account_id, user_id=user.id, role=inv.role))
         inv.accepted_at = now_utc()
+        if inv.manage_schema_ids:
+            mem = db.query(Membership).filter(
+                Membership.account_id == inv.account_id,
+                Membership.user_id == user.id
+            ).first()
+        if mem:
+            mem.manage_schema_ids = inv.manage_schema_ids
+
         db.commit()
         account_id = inv.account_id
     else:
