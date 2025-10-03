@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from uuid import uuid4
 from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, UniqueConstraint, Enum as SAEnum, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = None
@@ -49,6 +49,7 @@ class Membership(Base):
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     role = Column(SAEnum(Role), nullable=False, default=Role.MEMBER)
+    manage_schema_ids = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     account = relationship("Account", back_populates="members")
@@ -65,6 +66,7 @@ class Invitation(Base):
     token_hash = Column(String(128), unique=True, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     accepted_at = Column(DateTime, nullable=True)
+    manage_schema_ids = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class RefreshToken(Base):

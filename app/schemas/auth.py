@@ -1,4 +1,4 @@
-from typing import Optional, Annotated
+from typing import Optional, Annotated, List
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, StringConstraints
 from uuid import UUID
 from enum import Enum
@@ -27,6 +27,10 @@ class TokenPair(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
 
+class MembershipOut(BaseModel):
+    account_id: UUID
+    role: RoleEnum
+    account_name: Optional[str] = None  
 class Me(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
@@ -34,10 +38,7 @@ class Me(BaseModel):
     first_name: Optional[str]
     last_name: Optional[str]
     is_active: bool
-
-class InviteCreate(BaseModel):
-    email: EmailStr
-    role: RoleEnum
+    memberships: List[MembershipOut] = []   
 
 class MemberOut(BaseModel):
     user_id: UUID
@@ -75,5 +76,36 @@ class PasswordForgotBody(BaseModel):
 class PasswordResetBody(BaseModel):
     token: str = Field(..., description="Raw reset token from email link.")
     new_password: str = Field(..., min_length=6, description="New password (min 6 chars).")
+
+class InviteMemberBody(BaseModel):
+    email: EmailStr
+    role: RoleEnum = Field(description="One of OWNER/ADMIN/MEMBER/VIEWER. Only OWNER can invite.")
+    manage_schema_ids: Optional[List[UUID]] = Field(
+        default=None,
+        description="Optional list of schema IDs within this account the member may manage (admins/owners ignore)."
+    )
+
+class MemberUpdatePermissions(BaseModel):
+    manage_schema_ids: Optional[List[UUID]] = Field(
+        default=None,
+        description="Replace allowed schemas list for this member. Set [] to clear."
+    )
+
+class SchemaCreate(BaseModel):
+    schema_name: str
+    schema_body: dict = Field(alias="schema", validation_alias="schema")
+    validators: Optional[dict] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+class SchemaOut(BaseModel):
+    id: UUID
+    schema_name: str
+    schema_body: dict = Field(alias="schema", validation_alias="schema")
+    validators: Optional[dict] = None
+    account_id: UUID
+    created_by_user_id: Optional[UUID]
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
