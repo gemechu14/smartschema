@@ -24,7 +24,7 @@ class Settings(BaseModel):
     google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     google_redirect_uri: str = os.getenv("GOOGLE_REDIRECT_URI", "")
 
-    app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000")
+    app_base_url: str = os.getenv("APP_BASE_URL", "http://3.141.190.135:8000")
     invite_exp_days: int = int(os.getenv("INVITE_EXP_DAYS", "7"))
     email_verify_exp_hours: int = int(os.getenv("EMAIL_VERIFY_EXP_HOURS", "24"))
 
