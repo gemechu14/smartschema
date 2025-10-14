@@ -6,3 +6,5 @@ pydantic
 python-multipart
 pandas
 pdfplumber
+
+stripe
