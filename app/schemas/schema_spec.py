@@ -13,6 +13,8 @@ class SchemaJSON(BaseModel):
 # ---------- CREATE ----------
 class SchemaSpecCreate(BaseModel):
     schema_name: Optional[str] = None
+    # optional human-readable description for the schema specification
+    description: Optional[str] = None
     # external key is "schema"; internal field is "schema_body"
     schema_body: SchemaJSON = Field(alias="schema", validation_alias="schema")
     # validators is a plain dict: column -> rules
@@ -25,9 +27,15 @@ class SchemaSpecCreate(BaseModel):
 class SchemaSpecRead(BaseModel):
     id: UUID
     schema_name: str
+    description: Optional[str] = None
     # expose "schema" in JSON; read from ORM attr "schema"
     schema_body: SchemaJSON = Field(alias="schema", validation_alias="schema")
     validators: Dict[str, Dict[str, Any]]
+
+    # computed / presentation-only fields (not stored in DB)
+    columns: Optional[int] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
     # pydantic v2 style
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -35,6 +43,7 @@ class SchemaSpecRead(BaseModel):
 # ---------- UPDATE ----------
 class SchemaSpecUpdate(BaseModel):
     schema_name: Optional[str] = None
+    description: Optional[str] = None
     schema_body: Optional[SchemaJSON] = Field(default=None, alias="schema", validation_alias="schema")
     validators: Optional[Dict[str, Dict[str, Any]]] = None
 
