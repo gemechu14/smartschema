@@ -5,6 +5,7 @@ from app.api.deps_auth import require_role_for_account, get_db
 from app.models.auth_models import Role
 from app.models.subscription import Subscription
 from app.services.billing import create_checkout_session, create_billing_portal_session, PLANS
+from app.services.billing import status_description
 from app.core.config import settings
 from uuid import UUID
 from app.schemas.subscription import PlansResponse, CheckoutResponse, PortalResponse, SubscriptionRead
@@ -12,15 +13,7 @@ from app.schemas.subscription import PlansResponse, CheckoutResponse, PortalResp
 router = APIRouter(prefix="/accounts/{account_id}/subscriptions", tags=["subscriptions"])
 
 
-@router.get(
-    "/plans",
-    response_model=Dict[str, PlansResponse] | Dict[str, Any],
-    summary="List available plans",
-    description="Return available plans and their limits (rows, schemas, members). Does not expose Stripe price IDs.",
-)
-def list_plans():
-    # Return simple plan metadata (do not expose Stripe price ids here)
-    return {k: {"name": v["name"], "price": v["price"], "limits": v["limits"]} for k, v in PLANS.items()}
+# account-scoped plans endpoint removed in favor of public `/plans` endpoint
 
 
 @router.post(
@@ -55,7 +48,9 @@ def create_portal(account_id: UUID, db: Session = Depends(get_db), tup = Depends
     rec = db.query(Subscription).filter(Subscription.account_id == account_id).first()
     if not rec or not rec.stripe_customer_id:
         raise HTTPException(status_code=404, detail="No billing customer found for account")
-    session = create_billing_portal_session(rec.stripe_customer_id, settings.app_base_url)
+    # Return the user to a dedicated billing portal return page so frontend can display updated status
+    return_url = f"{settings.app_base_url}/billing/portal-return?account_id={account_id}"
+    session = create_billing_portal_session(rec.stripe_customer_id, return_url)
     return {"url": session.url}
 
 
@@ -70,9 +65,35 @@ def get_subscription(account_id: UUID, db: Session = Depends(get_db), tup = Depe
     rec = db.query(Subscription).filter(Subscription.account_id == account_id).first()
     if not rec:
         # default to FREE
-        return {"plan": "FREE", "status": "free", "current_period_end": None}
+        free = PLANS.get("FREE", {})
+        return {
+            "plan": "FREE",
+            "status": "active",
+            "current_period_end": None,
+            "display_status": "Active (Free)",
+            "status_description": status_description("active"),
+            "limits": free.get("limits"),
+            "features": {
+                "api_access": False,
+                "white_label_embedding": False,
+                "community_support": True,
+                "priority_support": False,
+            }
+        }
+
+    plan_meta = PLANS.get(rec.plan, {})
+    features = {
+        "api_access": True if rec.plan == "PRO" else False,
+        "white_label_embedding": True if rec.plan == "PRO" else False,
+        "community_support": True if rec.plan == "FREE" else False,
+        "priority_support": True if rec.plan == "PRO" else False,
+    }
     return {
         "plan": rec.plan,
         "status": rec.status,
         "current_period_end": rec.current_period_end,
+        "display_status": (rec.status.capitalize() if rec.status else "Unknown"),
+        "status_description": status_description(rec.status or "unknown"),
+        "limits": plan_meta.get("limits"),
+        "features": features,
     }

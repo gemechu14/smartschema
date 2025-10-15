@@ -298,7 +298,40 @@ def me(user = Depends(current_user), db: Session = Depends(get_db)):
         for (m, acc) in rows
     ]
 
-    # Return Me DTO with memberships
+    # Determine a default account to show subscription for: prefer the first membership if present
+    account_id = memberships[0].account_id if memberships else None
+
+    # Fetch subscription record for that account (if any) and follow same defaults as /accounts/{account_id}/subscriptions
+    plan = None
+    status = None
+    current_period_end = None
+    if account_id:
+        from app.models.subscription import Subscription
+        rec = db.query(Subscription).filter(Subscription.account_id == account_id).first()
+        if not rec:
+            # default to FREE
+            plan = "FREE"
+            status = "active"
+            current_period_end = None
+        else:
+            plan = rec.plan
+            status = rec.status
+            current_period_end = rec.current_period_end
+
+    # Compute is_subscribed: True iff plan == 'PRO' AND status == 'active' AND current_period_end not passed
+    from app.core.security import now_utc
+    is_subscribed = False
+    if plan == "PRO" and status == "active":
+        # If current_period_end is None treat as active indefinite; otherwise ensure it's in the future
+        if current_period_end is None:
+            is_subscribed = True
+        else:
+            try:
+                is_subscribed = current_period_end > now_utc()
+            except Exception:
+                is_subscribed = False
+
+    # Return Me DTO with memberships and subscription flag
     return Me(
         id=user.id,
         email=user.email,
@@ -306,6 +339,7 @@ def me(user = Depends(current_user), db: Session = Depends(get_db)):
         last_name=user.last_name,
         is_active=user.is_active,
         memberships=memberships,
+        is_subscribed=is_subscribed,
     )
 
 

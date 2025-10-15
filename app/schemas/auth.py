@@ -1,4 +1,5 @@
 from typing import Optional, Annotated, List
+from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, StringConstraints
 from uuid import UUID
 from enum import Enum
@@ -38,7 +39,9 @@ class Me(BaseModel):
     first_name: Optional[str]
     last_name: Optional[str]
     is_active: bool
-    memberships: List[MembershipOut] = []   
+    memberships: List[MembershipOut] = []
+    # Whether the current account is actively subscribed to PRO
+    is_subscribed: bool = False
 
 class MemberOut(BaseModel):
     user_id: UUID

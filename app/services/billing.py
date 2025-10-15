@@ -15,22 +15,24 @@ PLANS = {
         "id": "free",
         "name": "Free",
         "price": 0,
+        "import_formats": ["csv", "excel", "json"],
         "limits": {
             "rows": 1000,
             "schemas": 5,
             "members": 3,
-        }
+        },
     },
     "PRO": {
         "id": "pro",
         "name": "Pro",
         "price": 19900,  # in cents
+        "import_formats": ["csv", "excel", "json"],
         "limits": {
             "rows": None,
             "schemas": None,
             "members": None,
-        }
-    }
+        },
+    },
 }
 
 
@@ -84,3 +86,36 @@ def retrieve_subscription(stripe_subscription_id: Optional[str] = None, stripe_c
     except Exception:
         return None
     return None
+
+
+def canonicalize_status(raw_status: Optional[str]) -> str:
+    """Map Stripe raw status to a small canonical set used by the app."""
+    if not raw_status:
+        return "unknown"
+    s = raw_status.lower()
+    if s in ("active", "trialing"):
+        return "active"
+    if s in ("incomplete", "incomplete_expired"):
+        return "incomplete"
+    if s in ("past_due", "unpaid"):
+        return "past_due"
+    if s in ("canceled", "cancelled"):
+        return "canceled"
+    if s in ("paused", "pause_collection"):
+        return "paused"
+    return s
+
+
+def status_description(canonical_status: str) -> str:
+    """Return a user-friendly description for a canonical status."""
+    desc = {
+        "active": "Subscription is active and billing is up to date.",
+        "trialing": "Subscription is on a trial period.",
+        "incomplete": "Subscription has an incomplete or failed initial payment.",
+        "past_due": "Payment is past due; action may be required to avoid cancellation.",
+        "unpaid": "Subscription payments have failed and it is unpaid.",
+        "canceled": "Subscription has been canceled and will not renew.",
+        "paused": "Subscription is paused.",
+        "unknown": "Subscription status is unknown.",
+    }
+    return desc.get(canonical_status, "Subscription status: " + canonical_status)

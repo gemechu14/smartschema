@@ -21,3 +21,5 @@ class SubscriptionRead(BaseModel):
     plan: str
     status: str
     current_period_end: Optional[datetime] = None
+    display_status: Optional[str] = None
+    status_description: Optional[str] = None
