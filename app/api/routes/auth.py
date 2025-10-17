@@ -13,6 +13,7 @@ from app.core.security import (
     hash_password, verify_password, make_access_token, make_refresh_token,
     sha256, parse_name_from_email, now_utc, decode_jwt, ensure_aware
 )
+from app.services.billing import canonicalize_status
 from app.models.auth_models import User, Account, Membership, Role, Invitation, RefreshToken
 from app.models.verification import EmailVerification
 from app.models.password_reset import PasswordReset
@@ -315,13 +316,17 @@ def me(user = Depends(current_user), db: Session = Depends(get_db)):
             current_period_end = None
         else:
             plan = rec.plan
-            status = rec.status
-            current_period_end = rec.current_period_end
+            # prefer raw_stripe_status for canonicalization if present, else fall back to stored status
+            raw = getattr(rec, 'raw_stripe_status', None)
+            status = canonicalize_status(raw or rec.status)
+            current_period_end = ensure_aware(rec.current_period_end)
 
     # Compute is_subscribed: True iff plan == 'PRO' AND status == 'active' AND current_period_end not passed
     from app.core.security import now_utc
     is_subscribed = False
-    if plan == "PRO" and status == "active":
+    # normalize plan casing and compare canonical status
+    plan_key = plan.upper() if isinstance(plan, str) else None
+    if plan_key == "PRO" and status == "active":
         # If current_period_end is None treat as active indefinite; otherwise ensure it's in the future
         if current_period_end is None:
             is_subscribed = True

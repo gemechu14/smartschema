@@ -49,8 +49,20 @@ def create_portal(account_id: UUID, db: Session = Depends(get_db), tup = Depends
     if not rec or not rec.stripe_customer_id:
         raise HTTPException(status_code=404, detail="No billing customer found for account")
     # Return the user to a dedicated billing portal return page so frontend can display updated status
-    return_url = f"{settings.app_base_url}/billing/portal-return?account_id={account_id}"
-    session = create_billing_portal_session(rec.stripe_customer_id, return_url)
+    return_url = f"{settings.app_base_url}/billing/portal-return"
+    try:
+        session = create_billing_portal_session(rec.stripe_customer_id, return_url)
+    except Exception as e:
+        # Common cause: Billing Portal not configured in Stripe test/live settings
+        msg = str(e)
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Could not create Billing Portal session: "
+                f"{msg}.\nEnsure you have configured the Customer Portal in your Stripe dashboard (test/live) at: "
+                "https://dashboard.stripe.com/test/settings/billing/portal"
+            ),
+        )
     return {"url": session.url}
 
 
@@ -88,6 +100,7 @@ def get_subscription(account_id: UUID, db: Session = Depends(get_db), tup = Depe
         "community_support": True if rec.plan == "FREE" else False,
         "priority_support": True if rec.plan == "PRO" else False,
     }
+
     return {
         "plan": rec.plan,
         "status": rec.status,

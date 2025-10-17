@@ -8,6 +8,8 @@ from app.models.subscription import WebhookEvent
 from sqlalchemy.orm import Session
 from datetime import datetime
 from app.services.billing import canonicalize_status
+from app.services.billing import retrieve_subscription
+from app.models.auth_models import User, Membership
 
 router = APIRouter(prefix="/stripe", tags=["stripe"])
 
@@ -58,6 +60,26 @@ async def webhook(request: Request):
             customer = obj.get("customer")
             subscription_id = obj.get("subscription")
             account_id = obj.get("metadata", {}).get("account_id")
+            # If the Checkout Session didn't include metadata.account_id, try to resolve it
+            if not account_id:
+                # 1) If subscription id is present, fetch subscription from Stripe to look for metadata
+                if subscription_id:
+                    try:
+                        sub = retrieve_subscription(stripe_subscription_id=subscription_id)
+                        if sub:
+                            account_id = sub.get("metadata", {}).get("account_id")
+                    except Exception:
+                        account_id = None
+                # 2) If still no account_id, try to find a user by customer email (if provided) and use their first membership
+                if not account_id:
+                    customer_email = obj.get("customer_details", {}).get("email") or obj.get("customer_email")
+                    if customer_email:
+                        user = db.query(User).filter(User.email == customer_email.lower()).first()
+                        if user:
+                            membership = db.query(Membership).filter(Membership.user_id == user.id).first()
+                            if membership:
+                                account_id = str(membership.account_id)
+
             if account_id:
                 rec = db.query(Subscription).filter(Subscription.account_id == account_id).first()
                 # try to get current_period_end from event metadata/subscriptions
@@ -66,7 +88,43 @@ async def webhook(request: Request):
                     cpe_ts = obj.get("subscriptions", {}).get("current_period_end")
                 except Exception:
                     cpe_ts = None
-                cpe = datetime.utcfromtimestamp(int(cpe_ts)) if cpe_ts else None
+                # If the checkout session only has a subscription id (common), fetch the subscription from Stripe
+                if not cpe_ts and subscription_id:
+                    try:
+                        sub_obj = retrieve_subscription(stripe_subscription_id=subscription_id)
+                        if sub_obj:
+                            # sub_obj may be a stripe.Subscription object or dict-like
+                            try:
+                                cpe_ts = sub_obj.get("current_period_end")
+                            except Exception:
+                                # fallback to attribute access
+                                cpe_ts = getattr(sub_obj, "current_period_end", None)
+                            # Some Stripe responses put current_period_end on the subscription items
+                            if not cpe_ts:
+                                try:
+                                    items = sub_obj.get("items", {}).get("data", [])
+                                except Exception:
+                                    items = getattr(sub_obj, "items", None)
+                                try:
+                                    # items may be a ListObject with data attribute
+                                    for it in items or []:
+                                        try:
+                                            cpe_ts = it.get("current_period_end")
+                                        except Exception:
+                                            cpe_ts = getattr(it, "current_period_end", None)
+                                        if cpe_ts:
+                                            break
+                                except Exception:
+                                    pass
+                            print(f'[webhook] fetched stripe subscription {subscription_id} cpe={cpe_ts}')
+                    except Exception:
+                        cpe_ts = None
+
+                cpe = None
+                try:
+                    cpe = datetime.utcfromtimestamp(int(cpe_ts)) if cpe_ts else None
+                except Exception:
+                    cpe = None
                 if not rec:
                     rec = Subscription(
                         account_id=account_id,
@@ -97,6 +155,34 @@ async def webhook(request: Request):
                 if rec:
                     # Stripe provides current_period_end as a timestamp
                     cpe = sub.get("current_period_end")
+                    # If cpe missing in the event, try fetching full subscription from Stripe
+                    if not cpe:
+                        try:
+                            fetched = retrieve_subscription(stripe_subscription_id=sub_id)
+                            if fetched:
+                                try:
+                                    cpe = fetched.get("current_period_end")
+                                except Exception:
+                                    cpe = getattr(fetched, "current_period_end", None)
+                                # inspect items if still missing
+                                if not cpe:
+                                    try:
+                                        items = fetched.get("items", {}).get("data", [])
+                                    except Exception:
+                                        items = getattr(fetched, "items", None)
+                                    try:
+                                        for it in items or []:
+                                            try:
+                                                cpe = it.get("current_period_end")
+                                            except Exception:
+                                                cpe = getattr(it, "current_period_end", None)
+                                            if cpe:
+                                                break
+                                    except Exception:
+                                        pass
+                            print(f'[webhook] customer.subscription.updated fetched cpe={cpe} for sub={sub_id}')
+                        except Exception:
+                            cpe = None
                     try:
                         rec.current_period_end = datetime.utcfromtimestamp(int(cpe)) if cpe else None
                     except Exception:
@@ -145,7 +231,38 @@ async def webhook(request: Request):
             if sub_id:
                 rec = db.query(Subscription).filter(Subscription.stripe_subscription_id == sub_id).first()
                 if rec:
+                    # mark canceled; attempt to preserve current_period_end if available on the event or via fetch
                     rec.status = "canceled"
+                    cpe = obj.get("current_period_end") or obj.get("ended_at")
+                    if not cpe:
+                        try:
+                            fetched = retrieve_subscription(stripe_subscription_id=sub_id)
+                            if fetched:
+                                try:
+                                    cpe = fetched.get("current_period_end")
+                                except Exception:
+                                    cpe = getattr(fetched, "current_period_end", None)
+                                if not cpe:
+                                    try:
+                                        items = fetched.get("items", {}).get("data", [])
+                                    except Exception:
+                                        items = getattr(fetched, "items", None)
+                                    try:
+                                        for it in items or []:
+                                            try:
+                                                cpe = it.get("current_period_end")
+                                            except Exception:
+                                                cpe = getattr(it, "current_period_end", None)
+                                            if cpe:
+                                                break
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            cpe = None
+                    try:
+                        rec.current_period_end = datetime.utcfromtimestamp(int(cpe)) if cpe else None
+                    except Exception:
+                        rec.current_period_end = None
                     db.commit()
     finally:
         db.close()
