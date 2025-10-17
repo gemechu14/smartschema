@@ -20,12 +20,43 @@ def issue_email_verification(db: Session, user_id, to_email: str, first_name: st
 
     link = f"{settings.app_base_url}/auth/verify?token={raw}"
     name = first_name or to_email.split("@")[0].capitalize()
-    html = f"""
-      <p>Hi {name},</p>
-      <p>Please verify your email to activate your account.</p>
-      <p><a href="{link}">Verify email</a></p>
-      <p>If the button doesn't work, copy and paste this URL:<br>{link}</p>
-    """
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome to LociMapper</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f6f8fb; margin: 0; padding: 0; color: #333; }}
+        .container {{ max-width: 600px; margin: 40px auto; background-color: #fff; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
+        .header {{ background-color: #0f172a; color: #fff; text-align: center; padding: 28px 24px; }}
+        .content {{ padding: 28px 32px; line-height: 1.6; }}
+        .btn {{ display:inline-block; background:#0f172a; color:#ffffff !important; -webkit-text-size-adjust:none; padding:12px 20px; border-radius:8px; text-decoration:none }}
+        .footer {{ text-align: center; color: #999; font-size: 12px; padding: 16px 0; }}
+        h1 {{ margin: 0; font-size: 22px; }}
+        h3 {{ margin-top: 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Welcome to LociMapper</h1>
+        </div>
+        <div class="content">
+            <h3>Hello {name},</h3>
+            <p>Welcome to <strong>LociMapper</strong> — your trusted platform for seamless data mapping and validation. To complete your signup, please verify your email address below:</p>
+            <p style="text-align:left;"><a class="btn" href="{link}" style="color:#ffffff !important; text-decoration:none;">Verify My Email</a></p>
+            <p>If the button doesn't work, copy and paste this URL into your browser:<br><a href="{link}">{link}</a></p>
+            <p>If you didn’t sign up for LociMapper, simply ignore this message.</p>
+            <p>Cheers,<br>The LociMapper Team</p>
+        </div>
+        <div class="footer">
+            &copy; {__import__('datetime').datetime.utcnow().year} LociMapper. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>
+'''
     send_email(to_email=to_email, subject="Verify your email", html=html)
     return raw, rec
 
@@ -61,18 +92,47 @@ def issue_password_reset(db: Session, user_id, to_email: str, first_name: str | 
     rec = PasswordReset(
         user_id=user_id,
         token_hash=sha256(raw),
-        expires_at=now_utc() + timedelta(hours=2),  # reset links valid for 2h
+        expires_at=now_utc() + timedelta(hours=settings.password_reset_exp_hours),
     )
     db.add(rec); db.flush()
 
     link = f"{settings.app_base_url}/auth/password/reset?token={raw}"
     name = first_name or to_email.split("@")[0].capitalize()
-    html = f"""
-      <p>Hi {name},</p>
-      <p>We received a request to reset your password.</p>
-      <p><a href="{link}">Reset your password</a></p>
-      <p>If the button doesn't work, copy and paste:<br>{link}</p>
-      <p>If you didn't request this, you can safely ignore this email.</p>
-    """
+    hours = settings.password_reset_exp_hours
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Password Changed Successfully - LociMapper</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f6f8fb; margin: 0; padding: 0; color: #333; }}
+        .container {{ max-width: 600px; margin: 40px auto; background-color: #fff; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
+        .header {{ background-color: #0f172a; color: #fff; text-align: center; padding: 24px; }}
+        .content {{ padding: 32px; line-height: 1.6; }}
+        .btn {{ display:inline-block; background:#0f172a; color:#ffffff !important; -webkit-text-size-adjust:none; padding:12px 20px; border-radius:8px; text-decoration:none }}
+        .footer {{ text-align: center; color: #999; font-size: 12px; padding: 16px 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>LociMapper</h2>
+        </div>
+        <div class="content">
+            <h3>Reset Your Password</h3>
+            <p>Hello {name},</p>
+            <p>We received a request to reset your password for your <strong>LociMapper</strong> account. You can set a new password by clicking the button below:</p>
+            <p><a class="btn" href="{link}" style="color:#ffffff !important; text-decoration:none; display:inline-block;">Reset Password</a></p>
+            <p>This link will expire in <strong>{hours} hours</strong>. If you didn’t request a password reset, you can safely ignore this message.</p>
+            <p>Stay secure,<br>The LociMapper Team</p>
+        </div>
+        <div class="footer">
+            &copy; {__import__('datetime').datetime.utcnow().year} LociMapper. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>
+'''
     send_email(to_email=to_email, subject="Reset your password", html=html)
     return raw, rec

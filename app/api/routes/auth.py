@@ -20,6 +20,7 @@ from app.models.password_reset import PasswordReset
 from app.api.routes.auth_utils import issue_password_reset
 
 from app.schemas.auth import MembershipOut, PasswordForgotBody, PasswordResetBody, MessageResponse, RoleEnum
+from app.schemas.auth import ChangePasswordBody, ChangeNameBody
 from app.api.routes.auth_utils import issue_email_verification
 from app.schemas.auth import (
     SignupBody, SignupResponse, VerifyResponse,
@@ -61,38 +62,97 @@ def _consume_invite(db: Session, invite_token: Optional[str]) -> Optional[Invita
     inv = db.query(Invitation).filter(Invitation.token_hash==token_hash).first()
     if not inv:
         raise HTTPException(400, "Invalid invite token")
-    if inv.accepted_at is not None or inv.expires_at < now_utc():
-        raise HTTPException(400, "Invite expired or already used")
-    return inv
+        msg = "Password updated"
 
-def _send_verification_email(user: User):
-    # stateless signed token with short TTL
-    payload = {
-        "sub": str(user.id),
-        "type": "verify_email",
-        "exp": int((now_utc() + timedelta(hours=settings.email_verify_exp_hours)).timestamp()),
-        "iss": settings.jwt_issuer
-    }
-    token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
-    link = f"{settings.app_base_url}/auth/verify-email?token={token}"
-    html = f"""
-    <p>Hi {user.first_name or ''},</p>
-    <p>Please verify your email for Locimapper:</p>
-    <p><a href="{link}">{link}</a></p>
-    """
-    send_email(user.email, "Verify your email", html, from_name=settings.mail_from_name)
+        # send confirmation email (best-effort) matching the provided template/screenshot
+        try:
+                html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Password Changed Successfully - LociMapper</title>
+    <style>
+        body {{
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f6f8fb;
+            margin: 0;
+            padding: 0;
+            color: #333;
+        }}
+        .container {{
+            max-width: 600px;
+            margin: 40px auto;
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }}
+        .header {{
+            background-color: #0f172a;
+            color: #fff;
+            text-align: center;
+            padding: 24px;
+        }}
+        .content {{
+            padding: 32px;
+            line-height: 1.6;
+        }}
+        .footer {{
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            padding: 16px 0;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>LociMapper</h2>
+        </div>
+        <div class="content">
+            <h3>Password Changed Successfully</h3>
+            <p>Hello {user.first_name or user.email},</p>
+            <p>This is a confirmation that your password for <strong>LociMapper</strong> was successfully updated.</p>
+            <p>If you did not make this change, please <a href="mailto:{settings.mail_from}" style="color: #0f172a; text-decoration: underline;">contact our support team</a> immediately.</p>
+            <p>Thank you for keeping your account secure,<br>The LociMapper Team</p>
+        </div>
+        <div class="footer">
+            &copy; {__import__('datetime').datetime.utcnow().year} LociMapper. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>
+'''
+                send_email(user.email, "Password Changed Successfully", html, from_name=settings.mail_from_name)
+        except Exception:
+                # best-effort: don't block the API if email sending fails
+                pass
 
-def _unique_account_name(db: Session, email: str, fn: Optional[str], ln: Optional[str]) -> str:
-    base_local = email.split("@")[0]
-    base = (fn or base_local).capitalize()
-    # e.g., "Alice's Workspace"
-    candidate = f"{base}'s Workspace"
-    i = 2
+        return MessageResponse(ok=True, message=msg)
     from app.models.auth_models import Account
     existing = {name for (name,) in db.query(Account.name).all()}
     while candidate in existing:
         candidate = f"{base}'s Workspace {i}"
         i += 1
+    return candidate
+
+
+def _unique_account_name(db: Session, email: str, first_name: Optional[str], last_name: Optional[str]) -> str:
+    """Create a human-friendly unique account name based on first/last or email local-part.
+    Ensures no collision with existing account names by appending numeric suffixes.
+    """
+    base = (first_name or email.split("@")[0]).strip()
+    if last_name:
+        base = f"{base} {last_name.split()[0]}"
+    candidate = f"{base}'s workspace"
+    i = 1
+    from app.models.auth_models import Account
+    existing = {name for (name,) in db.query(Account.name).all()}
+    while candidate in existing:
+        i += 1
+        candidate = f"{base}'s Workspace {i}"
     return candidate
 
 # ---- endpoints ----
@@ -206,6 +266,48 @@ def verify_email(
     rec.consumed_at = now_utc()
     db.commit()
     return VerifyResponse(verified=True, message="Email successfully verified.")
+
+
+# ---------- RESEND VERIFICATION ----------
+@router.post(
+    "/verify/resend",
+    response_model=MessageResponse,
+    summary="Resend email verification link",
+    description="""
+Send a fresh verification email for the given account email. Always returns a generic message to avoid user enumeration. Rate-limited per-account by a short cooldown.
+""",
+)
+def resend_verification(body: ResendBody, db: Session = Depends(get_db)):
+    email = body.email.lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+
+    # Always return generic message to avoid leaking whether an account exists.
+    if not user:
+        return MessageResponse(message="If an account exists, a verification email has been sent.")
+
+    # Rate-limit: check last created verification for this user
+    from app.models.verification import EmailVerification
+    from app.core.security import ensure_aware, now_utc
+    last = (
+        db.query(EmailVerification)
+        .filter(EmailVerification.user_id == user.id)
+        .order_by(EmailVerification.created_at.desc())
+        .first()
+    )
+    cooldown = settings.email_verify_resend_cooldown_seconds
+    if last and last.created_at and ensure_aware(last.created_at) + timedelta(seconds=cooldown) > now_utc():
+        # too soon
+        raise HTTPException(status_code=429, detail="Verification email recently sent. Please wait before trying again.")
+
+    try:
+        issue_email_verification(db, user.id, user.email, user.first_name)
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Generic response
+        return MessageResponse(message="If an account exists, a verification email has been sent.")
+
+    return MessageResponse(message="If an account exists, a verification email has been sent.")
 
 @router.post("/login", response_model=TokenPair)
 def login(body: LoginBody, request: Request, db: Session = Depends(get_db)):
@@ -349,6 +451,108 @@ def me(user = Depends(current_user), db: Session = Depends(get_db)):
 
 
 
+# ---------- CHANGE PASSWORD ----------
+@router.post(
+        "/change-password",
+        response_model=MessageResponse,
+        summary="Change password for logged-in user",
+)
+def change_password(
+        body: ChangePasswordBody,
+        user = Depends(current_user),
+        db: Session = Depends(get_db),
+):
+        # verify current password
+        if not user.password_hash or not verify_password(body.current_password, user.password_hash):
+                raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+        # confirm new passwords match
+        if body.new_password != body.confirm_new_password:
+                raise HTTPException(status_code=400, detail="New passwords do not match")
+
+        # update password hash
+        user.password_hash = hash_password(body.new_password)
+
+        # Revoke all refresh tokens for this user to force re-login across sessions
+        from app.models.auth_models import RefreshToken
+        q = db.query(RefreshToken).filter(RefreshToken.user_id == user.id, RefreshToken.revoked_at == None)
+        for rt in q.all():
+                rt.revoked_at = now_utc()
+
+        db.commit()
+
+        msg = "Password updated"
+
+        # send confirmation email (best-effort) matching the provided template/screenshot
+        try:
+                html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Password Changed Successfully - LociMapper</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f6f8fb; margin: 0; padding: 0; color: #333; }}
+        .container {{ max-width: 600px; margin: 40px auto; background-color: #fff; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
+        .header {{ background-color: #0f172a; color: #fff; text-align: center; padding: 24px; }}
+        .content {{ padding: 32px; line-height: 1.6; }}
+        .footer {{ text-align: center; color: #999; font-size: 12px; padding: 16px 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>LociMapper</h2>
+        </div>
+        <div class="content">
+            <h3>Password Changed Successfully</h3>
+            <p>Hello {user.first_name or user.email},</p>
+            <p>This is a confirmation that your password for <strong>LociMapper</strong> was successfully updated.</p>
+            <p>If you did not make this change, please <a href="mailto:{settings.mail_from}" style="color: #0f172a; text-decoration: underline;">contact our support team</a> immediately.</p>
+            <p>Thank you for keeping your account secure,<br>The LociMapper Team</p>
+        </div>
+        <div class="footer">
+            &copy; {__import__('datetime').datetime.utcnow().year} LociMapper. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>
+'''
+                send_email(user.email, "Password Changed Successfully", html, from_name=settings.mail_from_name)
+        except Exception:
+                # best-effort: don't block the API if email sending fails
+                pass
+
+        return MessageResponse(ok=True, message=msg)
+
+
+# ---------- CHANGE NAME ----------
+@router.post(
+    "/change-name",
+    response_model=MessageResponse,
+    summary="Update first and/or last name",
+)
+def change_name(
+    body: ChangeNameBody,
+    user = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    updated = False
+    if body.first_name is not None:
+        user.first_name = body.first_name.strip() if body.first_name else None
+        updated = True
+    if body.last_name is not None:
+        user.last_name = body.last_name.strip() if body.last_name else None
+        updated = True
+
+    if not updated:
+        raise HTTPException(status_code=400, detail="No name fields provided")
+
+    db.commit()
+    return MessageResponse(ok=True, message="Profile name updated")
+
+
+
 # ---- Google (skeleton; wire later) ----
 
 @router.get("/google/start", response_model=GoogleStartOut)
@@ -464,16 +668,24 @@ def google_callback(
     # 5) Find or create user; link google_sub if needed
     user = db.query(User).filter(User.email == email).first()
     if not user:
-        fn, ln = names_from_google_userinfo(userinfo, email)
-        user = User(
-            email=email,
-            google_sub=sub,
-            is_active=True,
-            first_name=fn,
-            last_name=ln,
-        )
-        db.add(user)
-        db.flush()
+        # If a user already exists with this google_sub, reuse that user to avoid unique constraint errors
+        existing_by_sub = db.query(User).filter(User.google_sub == sub).first()
+        if existing_by_sub:
+            user = existing_by_sub
+            # ensure email is set/updated if missing
+            if not user.email:
+                user.email = email
+        else:
+            fn, ln = names_from_google_userinfo(userinfo, email)
+            user = User(
+                email=email,
+                google_sub=sub,
+                is_active=True,
+                first_name=fn,
+                last_name=ln,
+            )
+            db.add(user)
+            db.flush()
     else:
         # If the email exists but is linked to a different Google sub, block to avoid hijack
         if user.google_sub and user.google_sub != sub:
@@ -605,5 +817,44 @@ def password_reset(body: PasswordResetBody, db: Session = Depends(get_db)):
 
     rec.consumed_at = now_utc()
     db.commit()
+    # send confirmation email (best-effort) using the nicer HTML template
+    try:
+        html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Password Changed Successfully - LociMapper</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f6f8fb; margin: 0; padding: 0; color: #333; }}
+        .container {{ max-width: 600px; margin: 40px auto; background-color: #fff; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
+        .header {{ background-color: #0f172a; color: #fff; text-align: center; padding: 24px; }}
+        .content {{ padding: 32px; line-height: 1.6; }}
+        .footer {{ text-align: center; color: #999; font-size: 12px; padding: 16px 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>LociMapper</h2>
+        </div>
+        <div class="content">
+            <h3>Password Changed Successfully</h3>
+            <p>Hello {user.first_name or user.email},</p>
+            <p>This is a confirmation that your password for <strong>LociMapper</strong> was successfully updated.</p>
+            <p>If you did not make this change, please <a href="mailto:{settings.mail_from}" style="color: #0f172a; text-decoration: underline;">contact our support team</a> immediately.</p>
+            <p>Thank you for keeping your account secure,<br>The LociMapper Team</p>
+        </div>
+        <div class="footer">
+            &copy; {__import__('datetime').datetime.utcnow().year} LociMapper. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>
+'''
+        send_email(user.email, "Password Changed Successfully", html, from_name=settings.mail_from_name)
+    except Exception:
+        # best-effort: ignore send failures
+        pass
 
     return MessageResponse(message="Password has been reset. Please log in with your new password.")

@@ -80,6 +80,17 @@ class PasswordResetBody(BaseModel):
     token: str = Field(..., description="Raw reset token from email link.")
     new_password: str = Field(..., min_length=6, description="New password (min 6 chars).")
 
+
+class ChangePasswordBody(BaseModel):
+    current_password: str = Field(..., min_length=1, description="Current password")
+    new_password: str = Field(..., min_length=6, description="New password (min 6 chars)")
+    confirm_new_password: str = Field(..., min_length=6, description="Confirm new password")
+    # names removed from this model; use ChangeNameBody to update profile names separately
+
+class ChangeNameBody(BaseModel):
+    first_name: Optional[NameStr] = None
+    last_name: Optional[NameStr] = None
+
 class InviteMemberBody(BaseModel):
     email: EmailStr
     role: RoleEnum = Field(description="One of OWNER/ADMIN/MEMBER/VIEWER. Only OWNER can invite.")
@@ -93,6 +104,12 @@ class MemberUpdatePermissions(BaseModel):
         default=None,
         description="Replace allowed schemas list for this member. Set [] to clear."
     )
+
+class TeamMemberOut(BaseModel):
+    email: EmailStr
+    role: str
+    schema_access: List[UUID] = []
+    status: str = Field(..., description="One of: active, inactive, pending, expired")
 
 class SchemaCreate(BaseModel):
     schema_name: str

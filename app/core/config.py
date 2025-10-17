@@ -27,5 +27,9 @@ class Settings(BaseModel):
     app_base_url: str = os.getenv("APP_BASE_URL", "http://3.141.190.135:8000")
     invite_exp_days: int = int(os.getenv("INVITE_EXP_DAYS", "7"))
     email_verify_exp_hours: int = int(os.getenv("EMAIL_VERIFY_EXP_HOURS", "24"))
+    # Cooldown in seconds before allowing another verification email to be resent for the same account
+    email_verify_resend_cooldown_seconds: int = int(os.getenv("EMAIL_VERIFY_RESEND_COOLDOWN_S", "60"))
+    # Password reset link expiry in hours (default 24 to match UX)
+    password_reset_exp_hours: int = int(os.getenv("PASSWORD_RESET_EXP_HOURS", "24"))
 
 settings = Settings()

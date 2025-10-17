@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.security import random_token, sha256, now_utc
 from app.models.auth_models import Account, Membership, Role, User, Invitation
 from app.models.schema_spec import SchemaSpecification
-from app.schemas.auth import InviteMemberBody, MemberOut, AccountRename, MemberUpdatePermissions
+from app.schemas.auth import InviteMemberBody, MemberOut, AccountRename, MemberUpdatePermissions, TeamMemberOut
 from app.services.mailer import send_email
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -33,34 +33,67 @@ def get_account(
     return {"id": str(acc.id), "name": acc.name}
 
 
-# ---------- LIST MEMBERS ----------
+
+
+
 @router.get(
-    "/{account_id}/members",
-    response_model=list[MemberOut],
-    summary="List members (Owner only)",
-    description="Lists all members in the account. Requires Owner role."
+    "/{account_id}/team_members",
+    response_model=list[TeamMemberOut],
+    summary="List team members and pending invites (Owner/Admin)",
+    description="Returns active members (ADMIN/MEMBER) and pending invites with status and schema access.",
 )
-def list_members(
+def team_members(
     account_id: UUID,
-    tup = Depends(require_role_for_account({Role.OWNER})),
+    tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN})),
     db: Session = Depends(get_db),
 ):
+    # members: include ADMIN and MEMBER roles only
     rows = (
         db.query(Membership, User)
         .join(User, User.id == Membership.user_id)
-        .filter(Membership.account_id == account_id)
+        .filter(Membership.account_id == account_id, Membership.role.in_([Role.ADMIN, Role.MEMBER]))
         .all()
     )
-    return [
-        MemberOut(
-            user_id=u.id,
-            email=u.email,
-            role=m.role,
-            first_name=u.first_name,
-            last_name=u.last_name
-        )
+
+    members = [
+        {
+            "email": u.email,
+            "role": m.role.value.lower(),
+            "schema_access": m.manage_schema_ids or [],
+            "status": "active" if u.is_active else "inactive",
+        }
         for (m, u) in rows
     ]
+
+    # pending invites (not accepted) - map to same shape, status pending/expired
+    from app.models.verification import EmailVerification
+    invites = (
+        db.query(Invitation)
+        .filter(Invitation.account_id == account_id)
+        .all()
+    )
+    from app.core.security import ensure_aware, now_utc
+    now = now_utc()
+    for inv in invites:
+        if inv.accepted_at:
+            # if accepted and there is a membership, skip; otherwise show as active if user exists
+            continue
+        status = "pending"
+        try:
+            if ensure_aware(inv.expires_at) < now:
+                status = "expired"
+        except Exception:
+            # If expires_at is malformed or comparison fails, conservatively keep pending
+            status = "pending"
+        members.append({
+            "email": inv.email,
+            "role": inv.role.value.lower(),
+            "schema_access": inv.manage_schema_ids or [],
+            "status": status,
+        })
+
+    # Return only members and admins (already filtered)
+    return members
 
 
 # ---------- CHANGE ROLE ----------
@@ -192,13 +225,57 @@ def invite_member(
 
     # email
     link = f"{settings.app_base_url}/auth/signup?invite={raw}&email={inv.email}"
-    html = f"""
-      <p>You’ve been invited to join an account on {settings.app_name} as <b>{inv.role}</b>.</p>
-      <p><a href="{link}">Accept invitation</a></p>
-      <p>If the button doesn't work, paste this URL:<br>{link}</p>
-    """
-    send_email(to_email=inv.email, subject=f"You're invited to {settings.app_name}", html=html)
-    return {"ok": True, "message": "Invitation sent."}
+    # Build a styled invite email similar to other transactional emails
+    inviter_user = tup[0]
+    account = db.get(Account, account_id)
+    expiry_days = settings.invite_exp_days
+    # human readable role label (e.g. 'Member', 'Admin')
+    role_label = (inv.role.value.replace('_', ' ').title() if hasattr(inv, 'role') else str(inv.role))
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>You're invited to {settings.app_name}</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f6f8fb; margin: 0; padding: 0; color: #333; }}
+        .container {{ max-width: 600px; margin: 40px auto; background-color: #fff; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
+        .header {{ background-color: #0f172a; color: #fff; text-align: center; padding: 28px 24px; }}
+        .content {{ padding: 28px 32px; line-height: 1.6; }}
+        .btn {{ display:inline-block; background:#0f172a; color:#ffffff !important; -webkit-text-size-adjust:none; padding:12px 20px; border-radius:8px; text-decoration:none }}
+        .footer {{ text-align: center; color: #999; font-size: 12px; padding: 16px 0; }}
+        h1 {{ margin: 0; font-size: 22px; }}
+        h3 {{ margin-top: 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Welcome to {settings.app_name}</h1>
+        </div>
+        <div class="content">
+            <h3>Hello,</h3>
+            <p><strong>{inviter_user.first_name or inviter_user.email}</strong> has invited you to join the workspace <strong>{account.name}</strong> as <strong>{role_label}</strong>.</p>
+            <p>To accept the invitation and create your account, click the button below:</p>
+            <p style="text-align:left;"><a class="btn" href="{link}" style="color:#ffffff !important; text-decoration:none;">Accept Invitation</a></p>
+            <p>This invitation will expire in <strong>{expiry_days} days</strong>. If the button doesn't work, copy and paste this URL into your browser:<br><a href="{link}">{link}</a></p>
+            <p>If you did not expect this invitation, you can ignore this message.</p>
+            <p>Cheers,<br>The {settings.app_name} Team</p>
+        </div>
+        <div class="footer">
+            &copy; {__import__('datetime').datetime.utcnow().year} {settings.app_name}. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>
+'''
+    try:
+        send_email(to_email=inv.email, subject=f"You're invited to {settings.app_name}", html=html, from_name=settings.mail_from_name)
+    except Exception:
+        # best-effort: don't fail invite creation if email sending fails
+        pass
+
+    return {"ok": True, "message": "Invitation created (email sent if SMTP available)."}
 
 
 # ---------- PREVIEW INVITE (public) ----------
