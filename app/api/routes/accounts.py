@@ -1,6 +1,6 @@
 from datetime import timedelta
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
@@ -9,7 +9,15 @@ from app.core.config import settings
 from app.core.security import random_token, sha256, now_utc
 from app.models.auth_models import Account, Membership, Role, User, Invitation
 from app.models.schema_spec import SchemaSpecification
-from app.schemas.auth import InviteMemberBody, MemberOut, AccountRename, MemberUpdatePermissions, TeamMemberOut
+from app.schemas.auth import (
+    InviteMemberBody,
+    MemberOut,
+    AccountRename,
+    MemberUpdatePermissions,
+    TeamMemberOut,
+)
+from app.schemas.auth import MemberUpdatePermissions as _MemberUpdatePermissions
+from typing import Optional
 from app.services.mailer import send_email
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -47,16 +55,22 @@ def team_members(
     tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN})),
     db: Session = Depends(get_db),
 ):
-    # members: include ADMIN and MEMBER roles only
+    # members: include ADMIN and MEMBER roles only, but exclude the caller
+    caller_user = tup[0]
     rows = (
         db.query(Membership, User)
         .join(User, User.id == Membership.user_id)
-        .filter(Membership.account_id == account_id, Membership.role.in_([Role.ADMIN, Role.MEMBER]))
+        .filter(
+            Membership.account_id == account_id,
+            Membership.role.in_([Role.ADMIN, Role.MEMBER]),
+            Membership.user_id != caller_user.id,
+        )
         .all()
     )
 
     members = [
         {
+            "user_id": str(u.id),
             "email": u.email,
             "role": m.role.value.lower(),
             "schema_access": m.manage_schema_ids or [],
@@ -86,6 +100,7 @@ def team_members(
             # If expires_at is malformed or comparison fails, conservatively keep pending
             status = "pending"
         members.append({
+            "user_id": None,
             "email": inv.email,
             "role": inv.role.value.lower(),
             "schema_access": inv.manage_schema_ids or [],
@@ -96,42 +111,7 @@ def team_members(
     return members
 
 
-# ---------- CHANGE ROLE ----------
-@router.patch(
-    "/{account_id}/members/{user_id}",
-    summary="Change a member's role (Owner only)",
-    description="Owner can change a member's role. Cannot demote the last remaining Owner."
-)
-def change_role(
-    account_id: UUID,
-    user_id: UUID,
-    role: Role,
-    tup = Depends(require_role_for_account({Role.OWNER})),
-    db: Session = Depends(get_db),
-):
-    user, _aid, _role = tup
 
-    # prevent removing last OWNER (including self-demote)
-    if role != Role.OWNER:
-        owners = (
-            db.query(Membership)
-            .filter(Membership.account_id == account_id, Membership.role == Role.OWNER)
-            .count()
-        )
-        if owners <= 1 and user_id == user.id:
-            raise HTTPException(400, "Cannot demote the last OWNER")
-
-    m = (
-        db.query(Membership)
-        .filter(Membership.account_id == account_id, Membership.user_id == user_id)
-        .first()
-    )
-    if not m:
-        raise HTTPException(404, "Membership not found")
-
-    m.role = role
-    db.commit()
-    return {"ok": True}
 
 
 # ---------- REMOVE MEMBER ----------
@@ -210,11 +190,30 @@ def invite_member(
     seen = set()
     normalized_unique = [sid for sid in normalized if not (sid in seen or seen.add(sid))]
 
+    # Prevent inviting someone who's already an active member or already has a pending invite
+    email_norm = str(body.email).lower().strip()
+    existing_member = (
+        db.query(Membership)
+        .join(User, User.id == Membership.user_id)
+        .filter(Membership.account_id == account_id, User.email == email_norm)
+        .first()
+    )
+    if existing_member:
+        raise HTTPException(400, detail="User is already a member of this account")
+
+    existing_invite = (
+        db.query(Invitation)
+        .filter(Invitation.account_id == account_id, Invitation.email == email_norm, Invitation.accepted_at == None)
+        .first()
+    )
+    if existing_invite:
+        raise HTTPException(400, detail="There is already a pending invitation for this email")
+
     # --- create invite ---
     raw = random_token(32)
     inv = Invitation(
         account_id=account_id,
-        email=str(body.email).lower().strip(),
+        email=email_norm,
         role=Role(body.role),
         token_hash=sha256(raw),
         expires_at=now_utc() + timedelta(days=settings.invite_exp_days),
@@ -312,57 +311,301 @@ def rename_account(
     return {"ok": True, "id": str(acc.id), "name": acc.name}
 
 
+# (Path-based permissions endpoint removed — use the body-only
+# `PUT /{account_id}/members/permissions` endpoint instead.)
+
+
+# New body-only endpoint to update member permissions without a path user id
 @router.put(
-    "/{account_id}/members/{member_user_id}/permissions",
-    summary="Update a member's allowed schemas (Owner only)",
+    "/{account_id}/members/permissions",
+    summary="Update member or invite permissions by body (Owner/Admin)",
     description="""
-Replace the per-schema management list for a MEMBER/VIEWER.  
-Owners/Admins always manage all schemas and ignore this list.
+Replace per-schema management for a member or update pending invite(s) by email. If `user_id` is provided in the body, it behaves like the path-based endpoint. If `email` is provided and `user_id` is omitted, only invitations matching that email will be updated.
 """,
 )
-def update_member_permissions(
+def update_member_permissions_by_body(
     account_id: UUID,
-    member_user_id: UUID,
     body: MemberUpdatePermissions,
-    tup = Depends(require_role_for_account({Role.OWNER})),
+    tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN})),
     db: Session = Depends(get_db),
 ):
-    mem = (
-        db.query(Membership)
-        .filter(Membership.account_id == account_id, Membership.user_id == member_user_id)
-        .first()
-    )
-    if not mem:
-        raise HTTPException(404, "Membership not found")
+    # Determine target: prefer user_id, else email
+    caller_user, _aid, caller_role = tup
 
-    # Normalize to strings (JSON-serializable), drop invalids, dedupe
-    raw_ids = body.manage_schema_ids or []
-    normalized: list[str] = []
-    for x in raw_ids:
-        try:
-            # accept either UUID or string-like and store as canonical string
-            normalized.append(str(UUID(str(x))))
-        except Exception:
-            raise HTTPException(400, detail=f"Invalid schema id: {x}")
+    if body.user_id is not None:
+        target_user_id = body.user_id
+        # try membership first
+        mem = (
+            db.query(Membership)
+            .filter(Membership.account_id == account_id, Membership.user_id == target_user_id)
+            .first()
+        )
+        if mem:
+            # Role update logic for membership (if provided)
+            if body.role is not None:
+                # Normalize incoming role to string (e.g. RoleEnum or raw string)
+                role_str = body.role.value if hasattr(body.role, 'value') else str(body.role)
+                # Disallow promoting to OWNER via this API
+                if role_str == Role.OWNER.value:
+                    raise HTTPException(status_code=403, detail="Promoting a member to OWNER is not allowed")
+                # Admin callers cannot change Owner roles
+                if caller_role == Role.ADMIN and mem.role == Role.OWNER:
+                    raise HTTPException(status_code=403, detail="Admins may not change Owner roles")
+                # prevent removing last OWNER (if demoting caller)
+                if role_str != Role.OWNER.value:
+                    owners = (
+                        db.query(Membership)
+                        .filter(Membership.account_id == account_id, Membership.role == Role.OWNER)
+                        .count()
+                    )
+                    if owners <= 1 and target_user_id == caller_user.id:
+                        raise HTTPException(400, "Cannot demote the last OWNER")
+                # apply role (convert string -> Role)
+                try:
+                    mem.role = Role(role_str)
+                    # If promoted to ADMIN/OWNER, clear per-schema manage list
+                    if mem.role in (Role.ADMIN, Role.OWNER):
+                        mem.manage_schema_ids = None
+                        # Also clear any pending invites for this user in this account
+                        try:
+                            # fetch user's email if membership has user_id
+                            if mem.user_id:
+                                u = db.get(User, mem.user_id)
+                                if u:
+                                    invites = db.query(Invitation).filter(Invitation.account_id == account_id, Invitation.email == u.email).all()
+                                    for inv in invites:
+                                        inv.manage_schema_ids = None
+                        except Exception:
+                            # best-effort: don't fail the role change if invite cleanup fails
+                            pass
+                except Exception:
+                    pass
 
-    # (Optional but recommended) ensure each schema actually belongs to this account
-    if normalized:
-        existing = {
-            str(r[0])
-            for r in db.query(SchemaSpecification.id)
-                      .filter(SchemaSpecification.account_id == account_id,
-                              SchemaSpecification.id.in_(normalized))
-                      .all()
-        }
-        missing = [sid for sid in normalized if sid not in existing]
-        if missing:
-            raise HTTPException(400, detail=f"Schema ids not in this account: {missing}")
+            # Only process manage_schema_ids when the field was provided in the request
+            if body.manage_schema_ids is not None:
+                raw_ids = body.manage_schema_ids
+                normalized: list[str] = []
+                for x in raw_ids:
+                    try:
+                        normalized.append(str(UUID(str(x))))
+                    except Exception:
+                        raise HTTPException(400, detail=f"Invalid schema id: {x}")
 
-    # Deduplicate while preserving order
-    seen = set()
-    normalized_unique = [sid for sid in normalized if not (sid in seen or seen.add(sid))]
+                if normalized:
+                    existing = {
+                        str(r[0])
+                        for r in db.query(SchemaSpecification.id)
+                                  .filter(SchemaSpecification.account_id == account_id,
+                                          SchemaSpecification.id.in_(normalized))
+                                  .all()
+                    }
+                    missing = [sid for sid in normalized if sid not in existing]
+                    if missing:
+                        raise HTTPException(400, detail=f"Schema ids not in this account: {missing}")
 
-    mem.manage_schema_ids = normalized_unique
-    db.commit()
-    return {"ok": True, "message": "Permissions updated", "count": len(normalized_unique)}
+                seen = set()
+                normalized_unique = [sid for sid in normalized if not (sid in seen or seen.add(sid))]
+
+                # Only assign per-schema manage list to MEMBER or VIEWER roles.
+                if mem.role in (Role.MEMBER, getattr(Role, 'VIEWER', None)):
+                    mem.manage_schema_ids = normalized_unique or None
+                else:
+                    # For ADMIN/OWNER, clear per-schema manage list
+                    mem.manage_schema_ids = None
+
+            db.commit()
+            return {"ok": True, "message": "Permissions updated"}
+
+        # no membership -> update invites for the user (require user exists)
+        from app.models.auth_models import User as _User
+        user = db.query(_User).filter(_User.id == target_user_id).first()
+        if not user:
+            raise HTTPException(404, "No membership and no user found for provided user_id")
+
+        invite_targets = (
+            db.query(Invitation)
+            .filter(Invitation.account_id == account_id, Invitation.email == user.email)
+            .all()
+        )
+        if not invite_targets:
+            raise HTTPException(404, "No pending invites found for this user")
+        # If a role is provided, apply to invites as well (but disallow OWNER)
+        role_str = None
+        if body.role is not None:
+            role_str = body.role.value if hasattr(body.role, 'value') else str(body.role)
+            if role_str == Role.OWNER.value:
+                raise HTTPException(status_code=403, detail="Promoting to OWNER is not allowed via this API")
+            # Apply role to invites and clear per-schema list if promoted to ADMIN/OWNER
+            for inv in invite_targets:
+                try:
+                    inv.role = Role(role_str)
+                    if role_str in (Role.ADMIN.value, Role.OWNER.value):
+                        inv.manage_schema_ids = None
+                except Exception:
+                    pass
+
+        raw_ids = body.manage_schema_ids or []
+        normalized: list[str] = []
+        for x in raw_ids:
+            try:
+                normalized.append(str(UUID(str(x))))
+            except Exception:
+                raise HTTPException(400, detail=f"Invalid schema id: {x}")
+
+        if normalized:
+            existing = {
+                str(r[0])
+                for r in db.query(SchemaSpecification.id)
+                          .filter(SchemaSpecification.account_id == account_id,
+                                  SchemaSpecification.id.in_(normalized))
+                          .all()
+            }
+            missing = [sid for sid in normalized if sid not in existing]
+            if missing:
+                raise HTTPException(400, detail=f"Schema ids not in this account: {missing}")
+
+        seen = set()
+        normalized_unique = [sid for sid in normalized if not (sid in seen or seen.add(sid))]
+        for inv in invite_targets:
+            # If role was set to ADMIN/OWNER above, ensure we don't apply per-schema ids
+            if role_str and role_str in (Role.ADMIN.value, Role.OWNER.value):
+                inv.manage_schema_ids = None
+            else:
+                inv.manage_schema_ids = normalized_unique or None
+        db.commit()
+        return {"ok": True, "message": "Invite(s) updated", "count": len(invite_targets)}
+
+    # else email provided
+    if body.email is not None:
+        email = body.email.lower().strip()
+        # Prefer updating an existing membership for that email if present
+        from app.models.auth_models import User as _User
+        user = db.query(_User).filter(_User.email == email).first()
+        if user:
+            mem = (
+                db.query(Membership)
+                .filter(Membership.account_id == account_id, Membership.user_id == user.id)
+                .first()
+            )
+            if mem:
+                # If role provided, apply to membership with same safeguards as above
+                if body.role is not None:
+                    role_str = body.role.value if hasattr(body.role, 'value') else str(body.role)
+                    if role_str == Role.OWNER.value:
+                        raise HTTPException(status_code=403, detail="Promoting a member to OWNER is not allowed")
+                    if caller_role == Role.ADMIN and mem.role == Role.OWNER:
+                        raise HTTPException(status_code=403, detail="Admins may not change Owner roles")
+                    if role_str != Role.OWNER.value:
+                        owners = (
+                            db.query(Membership)
+                            .filter(Membership.account_id == account_id, Membership.role == Role.OWNER)
+                            .count()
+                        )
+                        if owners <= 1 and user.id == caller_user.id:
+                            raise HTTPException(400, "Cannot demote the last OWNER")
+                    try:
+                        mem.role = Role(role_str)
+                        # If promoted to ADMIN/OWNER, clear per-schema manage list
+                        if mem.role in (Role.ADMIN, Role.OWNER):
+                            mem.manage_schema_ids = None
+                            # Also clear pending invites matching this user's email
+                            try:
+                                if user:
+                                    invites = db.query(Invitation).filter(Invitation.account_id == account_id, Invitation.email == user.email).all()
+                                    for inv in invites:
+                                        inv.manage_schema_ids = None
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+                # manage_schema_ids only if provided
+                if body.manage_schema_ids is not None:
+                    raw_ids = body.manage_schema_ids
+                    normalized: list[str] = []
+                    for x in raw_ids:
+                        try:
+                            normalized.append(str(UUID(str(x))))
+                        except Exception:
+                            raise HTTPException(400, detail=f"Invalid schema id: {x}")
+
+                    if normalized:
+                        existing = {
+                            str(r[0])
+                            for r in db.query(SchemaSpecification.id)
+                                      .filter(SchemaSpecification.account_id == account_id,
+                                              SchemaSpecification.id.in_(normalized))
+                                      .all()
+                        }
+                        missing = [sid for sid in normalized if sid not in existing]
+                        if missing:
+                            raise HTTPException(400, detail=f"Schema ids not in this account: {missing}")
+
+                    seen = set()
+                    normalized_unique = [sid for sid in normalized if not (sid in seen or seen.add(sid))]
+
+                    if mem.role in (Role.MEMBER, getattr(Role, 'VIEWER', None)):
+                        mem.manage_schema_ids = normalized_unique or None
+                    else:
+                        mem.manage_schema_ids = None
+
+                db.commit()
+                return {"ok": True, "message": "Membership updated by email"}
+
+        # No active membership -> update invites matching this email
+        invite_targets = (
+            db.query(Invitation)
+            .filter(Invitation.account_id == account_id, Invitation.email == email)
+            .all()
+        )
+        if not invite_targets:
+            raise HTTPException(404, "No pending invites found for this email")
+
+        # Optionally apply role to invites
+        role_str = None
+        if body.role is not None:
+            role_str = body.role.value if hasattr(body.role, 'value') else str(body.role)
+            if role_str == Role.OWNER.value:
+                raise HTTPException(status_code=403, detail="Promoting to OWNER is not allowed via this API")
+            for inv in invite_targets:
+                try:
+                    inv.role = Role(role_str)
+                    if role_str in (Role.ADMIN.value, Role.OWNER.value):
+                        inv.manage_schema_ids = None
+                except Exception:
+                    pass
+
+        # manage_schema_ids for invites only if provided
+        if body.manage_schema_ids is not None:
+            raw_ids = body.manage_schema_ids
+            normalized: list[str] = []
+            for x in raw_ids:
+                try:
+                    normalized.append(str(UUID(str(x))))
+                except Exception:
+                    raise HTTPException(400, detail=f"Invalid schema id: {x}")
+
+            if normalized:
+                existing = {
+                    str(r[0])
+                    for r in db.query(SchemaSpecification.id)
+                              .filter(SchemaSpecification.account_id == account_id,
+                                      SchemaSpecification.id.in_(normalized))
+                              .all()
+                }
+                missing = [sid for sid in normalized if sid not in existing]
+                if missing:
+                    raise HTTPException(400, detail=f"Schema ids not in this account: {missing}")
+
+            seen = set()
+            normalized_unique = [sid for sid in normalized if not (sid in seen or seen.add(sid))]
+            for inv in invite_targets:
+                if role_str and role_str in (Role.ADMIN.value, Role.OWNER.value):
+                    inv.manage_schema_ids = None
+                else:
+                    inv.manage_schema_ids = normalized_unique or None
+        db.commit()
+        return {"ok": True, "message": "Invite(s) updated by email", "count": len(invite_targets)}
+
+    raise HTTPException(400, "Either user_id or email must be provided in request body")
 

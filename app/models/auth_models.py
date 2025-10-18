@@ -42,6 +42,7 @@ class Account(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     members = relationship("Membership", back_populates="account", cascade="all, delete-orphan")
+    __table_args__ = (UniqueConstraint("owner_user_id", name="uq_account_owner"),)
 
 class Membership(Base):
     __tablename__ = "memberships"

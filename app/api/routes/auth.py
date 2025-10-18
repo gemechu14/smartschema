@@ -61,82 +61,19 @@ def _consume_invite(db: Session, invite_token: Optional[str]) -> Optional[Invita
     token_hash = sha256(invite_token)
     inv = db.query(Invitation).filter(Invitation.token_hash==token_hash).first()
     if not inv:
-        raise HTTPException(400, "Invalid invite token")
-        msg = "Password updated"
+        raise HTTPException(status_code=400, detail="Invalid invite token")
 
-        # send confirmation email (best-effort) matching the provided template/screenshot
-        try:
-                html = f'''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Password Changed Successfully - LociMapper</title>
-    <style>
-        body {{
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f6f8fb;
-            margin: 0;
-            padding: 0;
-            color: #333;
-        }}
-        .container {{
-            max-width: 600px;
-            margin: 40px auto;
-            background-color: #fff;
-            border-radius: 12px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
-            overflow: hidden;
-        }}
-        .header {{
-            background-color: #0f172a;
-            color: #fff;
-            text-align: center;
-            padding: 24px;
-        }}
-        .content {{
-            padding: 32px;
-            line-height: 1.6;
-        }}
-        .footer {{
-            text-align: center;
-            color: #999;
-            font-size: 12px;
-            padding: 16px 0;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h2>LociMapper</h2>
-        </div>
-        <div class="content">
-            <h3>Password Changed Successfully</h3>
-            <p>Hello {user.first_name or user.email},</p>
-            <p>This is a confirmation that your password for <strong>LociMapper</strong> was successfully updated.</p>
-            <p>If you did not make this change, please <a href="mailto:{settings.mail_from}" style="color: #0f172a; text-decoration: underline;">contact our support team</a> immediately.</p>
-            <p>Thank you for keeping your account secure,<br>The LociMapper Team</p>
-        </div>
-        <div class="footer">
-            &copy; {__import__('datetime').datetime.utcnow().year} LociMapper. All rights reserved.
-        </div>
-    </div>
-</body>
-</html>
-'''
-                send_email(user.email, "Password Changed Successfully", html, from_name=settings.mail_from_name)
-        except Exception:
-                # best-effort: don't block the API if email sending fails
-                pass
+    # Reject invites that have already been accepted or expired
+    if inv.accepted_at is not None:
+        raise HTTPException(status_code=400, detail="Invite already accepted")
+    try:
+        if ensure_aware(inv.expires_at) < now_utc():
+            raise HTTPException(status_code=400, detail="Invite token has expired")
+    except Exception:
+        # If expires_at comparison fails, treat as invalid
+        raise HTTPException(status_code=400, detail="Invalid invite token")
 
-        return MessageResponse(ok=True, message=msg)
-    from app.models.auth_models import Account
-    existing = {name for (name,) in db.query(Account.name).all()}
-    while candidate in existing:
-        candidate = f"{base}'s Workspace {i}"
-        i += 1
-    return candidate
+    return inv
 
 
 def _unique_account_name(db: Session, email: str, first_name: Optional[str], last_name: Optional[str]) -> str:
@@ -210,21 +147,44 @@ def signup(body: SignupBody, db: Session = Depends(get_db)):
             inv.accepted_at = now_utc()
 
     if account_id is None:
-        # self-owned workspace
-        base = (first_name or email.split("@")[0]).strip()
-        acct = Account(name=f"{base}'s workspace", owner_user_id=user.id)
-        db.add(acct); db.flush()
-        account_id = acct.id
-        db.add(Membership(account_id=account_id, user_id=user.id, role=Role.OWNER))
+        # self-owned workspace — ensure only one personal account per user.
+        # Check if an account already exists for this owner (race-safe).
+        existing_acc = db.query(Account).filter(Account.owner_user_id == user.id).first()
+        if existing_acc:
+            account_id = existing_acc.id
+            # ensure membership exists
+            if not db.query(Membership).filter(Membership.account_id == account_id, Membership.user_id == user.id).first():
+                db.add(Membership(account_id=account_id, user_id=user.id, role=Role.OWNER))
+        else:
+            base = (first_name or email.split("@")[0]).strip()
+            acct = Account(name=f"{base}'s workspace", owner_user_id=user.id)
+            try:
+                db.add(acct)
+                db.flush()
+                account_id = acct.id
+                db.add(Membership(account_id=account_id, user_id=user.id, role=Role.OWNER))
+            except IntegrityError:
+                # some concurrent request created the account; rollback and reuse
+                db.rollback()
+                existing_acc = db.query(Account).filter(Account.owner_user_id == user.id).first()
+                if not existing_acc:
+                    raise
+                account_id = existing_acc.id
+                if not db.query(Membership).filter(Membership.account_id == account_id, Membership.user_id == user.id).first():
+                    db.add(Membership(account_id=account_id, user_id=user.id, role=Role.OWNER))
     else:
         db.add(Membership(account_id=account_id, user_id=user.id, role=role))
 
+    # If this signup used an invite that included per-schema permissions, ensure
+    # those are applied to the created membership. Flush/refresh to ensure the
+    # membership row exists and is attached before assigning the JSON list.
     if body.invite and inv and inv.manage_schema_ids:
+        db.flush()
         mem = db.query(Membership).filter(
             Membership.account_id == account_id,
             Membership.user_id == user.id
         ).first()
-        if mem:
+        if mem and mem.role in {Role.MEMBER, Role.VIEWER}:
             mem.manage_schema_ids = inv.manage_schema_ids
     # Send verification
     try:
@@ -579,34 +539,25 @@ def google_start():
     return {"auth_url": f"{base}?{urlencode(params)}"}
 
 @router.post(
-    "/google/callback",
-    response_model=TokenPair,
-    summary="Google OAuth callback → sign-in/sign-up + optional invite consumption",
-    description="""
+        "/google/callback",
+        response_model=TokenPair,
+        summary="Google OAuth callback → sign-in/sign-up",
+        description="""
 Exchanges a Google OAuth **authorization code** for tokens, fetches userinfo, and signs the user in.
 
-**Behavior:**
-- If an **invite** is provided and valid:
-  - The Google account's email **must match** the invitation email, otherwise `400`.
-  - The user is added to the invited account with the invited role, and the invite is marked accepted.
-- If **no invite**:
-  - If a user with this email **already exists**:
-    - If the user has **no** `google_sub`, it is linked to this Google account.
-    - If already linked, we reuse it (no overwrite of names).
-    - The user is activated if needed.
-  - If no user exists, we **create** one and **create a personal workspace** (OWNER).
-- Returns a standard **TokenPair** (access + refresh).
+If a user exists their Google sub may be linked. If no user exists a personal workspace is created.
 
-**Notes:**
+Returns a standard **TokenPair** (access + refresh).
+
+Notes:
 - The `code` may arrive URL-encoded; we safely decode it.
 - Common OAuth errors (`invalid_grant`, `redirect_uri_mismatch`) are returned as `400` with a useful message.
 """,
 )
 def google_callback(
-    request: Request,
-    code: str = Query(..., description="Authorization code returned by Google"),
-    invite: str | None = Query(None, description="Optional invitation token"),
-    db: Session = Depends(get_db),
+        request: Request,
+        code: str = Query(..., description="Authorization code returned by Google"),
+        db: Session = Depends(get_db),
 ):
     # 1) Decode code once to handle double-encoded cases (e.g., %252F → %2F)
     code = unquote(code)
@@ -658,12 +609,9 @@ def google_callback(
     if not verified:
         raise HTTPException(status_code=400, detail="Google account email is not verified.")
 
-    # 4) If invite is supplied, consume/validate it (email must match)
-    inv = None
-    if invite:
-        inv = _consume_invite(db, invite)  # must return Invitation or raise
-        if inv.email.lower().strip() != email:
-            raise HTTPException(status_code=400, detail="Use the Google account matching the invitation email.")
+    # Invite acceptance is intentionally not supported via Google OAuth; any
+    # invite-driven signups must use the `/auth/signup` flow. (We removed the
+    # `invite` parameter from this endpoint to avoid accidental use.)
 
     # 5) Find or create user; link google_sub if needed
     user = db.query(User).filter(User.email == email).first()
@@ -684,8 +632,24 @@ def google_callback(
                 first_name=fn,
                 last_name=ln,
             )
-            db.add(user)
-            db.flush()
+            # Insert may race with another concurrent request creating the same
+            # google_sub. Guard against unique-constraint failure by catching
+            # IntegrityError, rolling back, then querying the existing user and
+            # reusing it.
+            try:
+                db.add(user)
+                db.flush()
+            except IntegrityError:
+                db.rollback()
+                existing_by_sub = db.query(User).filter(User.google_sub == sub).first()
+                if existing_by_sub:
+                    user = existing_by_sub
+                    # ensure email is set if missing
+                    if not user.email:
+                        user.email = email
+                else:
+                    # If we couldn't find the conflicting row, re-raise to surface the issue
+                    raise
     else:
         # If the email exists but is linked to a different Google sub, block to avoid hijack
         if user.google_sub and user.google_sub != sub:
@@ -708,37 +672,37 @@ def google_callback(
         user.email_verified_at = now_utc()       
     db.commit()
 
-    # 6) Membership: invited vs default workspace
-    if inv:
-        exists = (
-            db.query(Membership)
-            .filter(Membership.account_id == inv.account_id, Membership.user_id == user.id)
-            .first()
-        )
-        if not exists:
-            db.add(Membership(account_id=inv.account_id, user_id=user.id, role=inv.role))
-        inv.accepted_at = now_utc()
-        if inv.manage_schema_ids:
-            mem = db.query(Membership).filter(
-                Membership.account_id == inv.account_id,
-                Membership.user_id == user.id
-            ).first()
-        if mem:
-            mem.manage_schema_ids = inv.manage_schema_ids
-
-        db.commit()
-        account_id = inv.account_id
-    else:
-        mem = db.query(Membership).filter(Membership.user_id == user.id).first()
-        if not mem:
+    # 6) Membership: default workspace (no invite handling in this callback)
+    # If the user already has a membership use it; otherwise create a personal workspace.
+    
+    
+    mem = db.query(Membership).filter(Membership.user_id == user.id).first()
+    if not mem:
+        # create personal account if none exists, but guard against races
+        existing_acc = db.query(Account).filter(Account.owner_user_id == user.id).first()
+        if existing_acc:
+            account_id = existing_acc.id
+            db.add(Membership(account_id=account_id, user_id=user.id, role=Role.OWNER))
+            db.commit()
+        else:
             name = _unique_account_name(db, email, user.first_name, user.last_name)
             account = Account(name=name, owner_user_id=user.id)
-            db.add(account); db.flush()
-            db.add(Membership(account_id=account.id, user_id=user.id, role=Role.OWNER))
-            db.commit()
-            account_id = account.id
-        else:
-            account_id = mem.account_id
+            try:
+                db.add(account); db.flush()
+                db.add(Membership(account_id=account.id, user_id=user.id, role=Role.OWNER))
+                db.commit()
+                account_id = account.id
+            except IntegrityError:
+                db.rollback()
+                existing_acc = db.query(Account).filter(Account.owner_user_id == user.id).first()
+                if not existing_acc:
+                    raise
+                account_id = existing_acc.id
+                if not db.query(Membership).filter(Membership.account_id == account_id, Membership.user_id == user.id).first():
+                    db.add(Membership(account_id=account_id, user_id=user.id, role=Role.OWNER))
+                    db.commit()
+    else:
+        account_id = mem.account_id
 
     # 7) Issue tokens and return
     return issue_tokens(

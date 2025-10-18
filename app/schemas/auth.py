@@ -100,12 +100,25 @@ class InviteMemberBody(BaseModel):
     )
 
 class MemberUpdatePermissions(BaseModel):
+    user_id: Optional[UUID] = Field(
+        default=None,
+        description="Optional user id. If omitted the path param will be used."
+    )
+    email: Optional[EmailStr] = Field(
+        default=None,
+        description="Optional email. If provided and user_id is omitted, update invites for this email only."
+    )
+    role: Optional[RoleEnum] = Field(
+        default=None,
+        description="Optional role to assign (OWNER/ADMIN/MEMBER/VIEWER). Promoting to OWNER via this API is not allowed."
+    )
     manage_schema_ids: Optional[List[UUID]] = Field(
         default=None,
         description="Replace allowed schemas list for this member. Set [] to clear."
     )
 
 class TeamMemberOut(BaseModel):
+    user_id: Optional[UUID] = None
     email: EmailStr
     role: str
     schema_access: List[UUID] = []
