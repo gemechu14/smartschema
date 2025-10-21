@@ -9,6 +9,7 @@ from app.api.routes.accounts import router as accounts_router
 from app.api.routes.subscriptions import router as subscriptions_router
 from app.api.routes.stripe_webhook import router as stripe_webhook_router
 from app.api.routes.public_plans import router as public_plans_router
+from app.api.routes.integrations import router as integrations_router
 
 app = FastAPI(title=settings.app_name)
 
@@ -28,6 +29,7 @@ app.include_router(schemas_router)
 app.include_router(subscriptions_router)
 app.include_router(stripe_webhook_router)
 app.include_router(public_plans_router)
+app.include_router(integrations_router)
 
 @app.get("/health")
 def health():

@@ -12,6 +12,7 @@ from app.models import auth_models  # noqa
 from app.models import verification
 from app.models import password_reset
 from app.models import subscription
+from app.models import integrations
 
 # from app.models import projects  # <- add new modules like this
 
