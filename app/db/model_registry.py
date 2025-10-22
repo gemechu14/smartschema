@@ -11,6 +11,7 @@ from app.models import schema_spec  # noqa
 from app.models import auth_models  # noqa
 from app.models import verification
 from app.models import password_reset
+from app.models import launch_token
 from app.models import subscription
 from app.models import integrations
 

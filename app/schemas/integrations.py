@@ -96,3 +96,50 @@ class UsageIncrement(BaseModel):
     amount: int = Field(1, description="Amount to increment usage counter by; default 1")
 
     model_config = {"from_attributes": True}
+
+
+class IntegrationLaunchRequest(BaseModel):
+    client_id: str = Field(..., description="Client ID of the app credential")
+    client_secret: str = Field(..., description="Client secret for the app credential")
+    integration_id: UUID = Field(..., description="Integration UUID to launch")
+
+
+class IntegrationLaunchResponse(BaseModel):
+    integration_id: UUID
+    # Contains the schema definition and its validation rules under `validators`
+    # Shape: {"schema": {...}, "validators": {...}}
+    schema_spec: Dict[str, Any]
+    app_name: str
+    theme: Optional[Dict[str, Any]]
+    api_endpoint: Optional[str]
+    api_headers: Optional[Dict[str, str]]
+    method: Optional[str]
+    behavior: Optional[Dict[str, Any]]
+    redirect_url: Optional[HttpUrl]
+
+    model_config = {"from_attributes": True}
+
+
+class IntegrationLaunchUrlResponse(BaseModel):
+    frontend_url: HttpUrl
+    
+
+
+class IntegrationLaunchInfoRequest(BaseModel):
+    token: str
+
+
+class IntegrationLaunchInfoResponse(BaseModel):
+    integration_id: UUID
+    # Contains the schema definition and its validation rules under `validators`
+    # Shape: {"schema": {...}, "validators": {...}}
+    schema_spec: Dict[str, Any]
+    app_name: str
+    theme: Optional[Dict[str, Any]]
+    api_endpoint: Optional[str]
+    api_headers: Optional[Dict[str, str]]
+    method: Optional[str]
+    behavior: Optional[Dict[str, Any]]
+    redirect_url: Optional[HttpUrl]
+
+    model_config = {"from_attributes": True}

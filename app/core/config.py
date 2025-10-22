@@ -31,5 +31,7 @@ class Settings(BaseModel):
     email_verify_resend_cooldown_seconds: int = int(os.getenv("EMAIL_VERIFY_RESEND_COOLDOWN_S", "60"))
     # Password reset link expiry in hours (default 24 to match UX)
     password_reset_exp_hours: int = int(os.getenv("PASSWORD_RESET_EXP_HOURS", "24"))
+    # Launch token TTL (seconds) for standalone import page tokens (default 5 minutes)
+    launch_token_ttl_seconds: int = int(os.getenv("LAUNCH_TOKEN_TTL_SECONDS", "300"))
 
 settings = Settings()
