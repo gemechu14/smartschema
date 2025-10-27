@@ -7,8 +7,9 @@ from sqlalchemy import func
 from datetime import datetime
 
 from app.api.deps_auth import get_db, require_role_for_account  # <-- path-only dep
-from app.models.auth_models import Role, Membership
+from app.models.auth_models import Role, Membership, Invitation
 from app.models.schema_spec import SchemaSpecification
+from app.models.integrations import Integration
 from app.schemas.schema_spec import SchemaSpecCreate, SchemaSpecRead, SchemaSpecUpdate
 from app.services.schema_inference import infer_from_file, infer_from_sql
 
@@ -293,8 +294,49 @@ def delete_schema(
     if not obj:
         raise HTTPException(404, "Schema not found")
 
-    # soft-delete
+    # soft-delete schema
     obj.deleted_at = datetime.utcnow()
+
+    # delete any integrations tied to this schema within the same account
+    try:
+        db.query(Integration).filter(
+            Integration.account_id == account_id,
+            Integration.schema_id == schema_id,
+        ).delete(synchronize_session=False)
+    except Exception:
+        # best-effort: ignore deletion errors here and continue to update memberships/invitations
+        pass
+
+    # remove schema_id from manage_schema_ids in memberships for this account
+    schema_id_str = str(schema_id)
+    moms = (
+        db.query(Membership)
+        .filter(Membership.account_id == account_id, Membership.manage_schema_ids != None)
+        .all()
+    )
+    for m in moms:
+        raw = m.manage_schema_ids or []
+        try:
+            new_list = [x for x in raw if str(x) != schema_id_str]
+        except Exception:
+            # if unexpected shape, skip
+            continue
+        m.manage_schema_ids = new_list or None
+
+    # remove schema_id from invitations.manage_schema_ids for this account
+    invs = (
+        db.query(Invitation)
+        .filter(Invitation.account_id == account_id, Invitation.manage_schema_ids != None)
+        .all()
+    )
+    for inv in invs:
+        raw = inv.manage_schema_ids or []
+        try:
+            new_list = [x for x in raw if str(x) != schema_id_str]
+        except Exception:
+            continue
+        inv.manage_schema_ids = new_list or None
+
     db.commit()
     return
 

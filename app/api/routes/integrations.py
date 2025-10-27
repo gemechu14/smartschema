@@ -129,6 +129,37 @@ def rotate_api_credential(account_id: UUID, credential_id: UUID,
     return APICredentialRotateResponse(id=cred.id, client_id=cred.client_id, client_secret=client_secret, client_secret_expires_at=cred.client_secret_expires_at)
 
 
+
+@router.delete("/{account_id}/credentials/{credential_id}", status_code=204, summary="Delete an app credential", description="Delete an app credential and any integrations bound to it. Permission: Owner/Admin/Member.")
+def delete_api_credential(account_id: UUID, credential_id: UUID,
+                          tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN, Role.MEMBER})), db: Session = Depends(get_db)):
+    caller_user = tup[0]
+    # fetch credential and ensure it belongs to account
+    cred = db.get(APICredential, credential_id)
+    if not cred or str(cred.account_id) != str(account_id):
+        raise HTTPException(404, detail="Credential not found")
+
+    # delete any integrations tied to this credential within the same account
+    try:
+        db.query(Integration).filter(
+            Integration.account_id == account_id,
+            Integration.credential_id == credential_id,
+        ).delete(synchronize_session=False)
+    except Exception:
+        # best-effort: ignore and continue to delete credential
+        pass
+
+    # delete the credential itself
+    try:
+        db.delete(cred)
+    except Exception:
+        # fallback to bulk delete if session.delete fails
+        db.query(APICredential).filter(APICredential.id == credential_id, APICredential.account_id == account_id).delete(synchronize_session=False)
+
+    db.commit()
+    return
+
+
 @router.post("/{account_id}/integrations", response_model=IntegrationOut, summary="Create an integration", description="Create an integration mapping to a schema and bound to a specific app credential. Permission: any account member. Note: Members can only create integrations for schemas listed in their membership's `manage_schema_ids`.")
 def create_integration(account_id: UUID, body: IntegrationCreate,
                        tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN, Role.MEMBER, getattr(Role, 'DEVELOPER', Role.MEMBER)})),
@@ -320,7 +351,9 @@ def integration_launch_info(credentials: HTTPAuthorizationCredentials = Depends(
     if not schema:
         raise HTTPException(status_code=404, detail="Schema not found")
 
-    # mark token used
+    # atomically increment integration usage and mark token used in the same transaction
+    stmt = update(Integration).where(Integration.id == integ.id).values(usage=Integration.usage + 1)
+    db.execute(stmt)
     lt.used = True
     db.add(lt)
     db.commit()
