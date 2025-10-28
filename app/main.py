@@ -18,7 +18,7 @@ app = FastAPI(title=settings.app_name)
 # CORS (open for now; tighten to specific origins later)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],              # e.g., ["http://localhost:3000", "https://your-frontend.com"]
+    allow_origins=["https://locimapper.com"],              # e.g., ["http://localhost:3000", "https://your-frontend.com"]
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
