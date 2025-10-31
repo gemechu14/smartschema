@@ -102,6 +102,7 @@ class IntegrationLaunchRequest(BaseModel):
     client_id: str = Field(..., description="Client ID of the app credential")
     client_secret: str = Field(..., description="Client secret for the app credential")
     integration_id: UUID = Field(..., description="Integration UUID to launch")
+    overrides: Optional[Dict[str, Any]] = Field(None, description="Optional overrides for template variables and headers. Example: {\"user_id\":123, \"foo\":21232, \"bar\":\"sjbd\", \"api_header\": {\"Content-Type\": \"application/json\"}}")
 
 
 class IntegrationLaunchResponse(BaseModel):

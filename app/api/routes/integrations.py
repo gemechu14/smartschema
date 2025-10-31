@@ -31,6 +31,10 @@ from app.schemas.integrations import UsageIncrement
 from sqlalchemy import update
 
 from app.core.security import ensure_aware
+import json
+import base64 as _base64
+import re
+import urllib.parse
 
 router = APIRouter(prefix="/accounts", tags=["integrations"])
 
@@ -310,8 +314,32 @@ def launch_integration_page(body: IntegrationLaunchRequest, db: Session = Depend
     if str(integ.account_id) != str(cred.account_id):
         raise HTTPException(status_code=403, detail="Credential not authorized for this integration")
 
-    # create short random token and persist its hash for single-use
-    raw_token = random_token(32)
+    # prepare optional overrides payload (we encode overrides into the token so we don't need DB schema changes)
+    overrides = getattr(body, 'overrides', None) or {}
+    # If overrides provided, validate key names against placeholders in the integration api_endpoint
+    template = integ.api_endpoint or ''
+    placeholders = set(re.findall(r'{([^{}]+)}', template))
+    if overrides:
+        if not isinstance(overrides, dict):
+            raise HTTPException(status_code=400, detail="overrides must be a JSON object")
+        override_keys = set(overrides.keys())
+        allowed_keys = placeholders.union({'api_header'})
+        # reject unknown keys
+        extra = override_keys.difference(allowed_keys)
+        if extra:
+            raise HTTPException(status_code=400, detail=f"Unknown override keys: {', '.join(sorted(list(extra)))}")
+        # require all placeholders be provided when overrides are used
+        missing = placeholders.difference(override_keys - {'api_header'})
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Missing override values for placeholders: {', '.join(sorted(list(missing)))}")
+        # validate api_header shape if present
+        if 'api_header' in overrides and overrides['api_header'] is not None and not isinstance(overrides['api_header'], dict):
+            raise HTTPException(status_code=400, detail="api_header override must be an object of string->string")
+
+    # create a token that encodes the overrides payload in a URL-safe base64 JSON to avoid DB schema changes
+    payload = {"r": random_token(8), "ovr": overrides}
+    raw_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+    raw_token = _base64.urlsafe_b64encode(raw_bytes).decode('utf-8').rstrip('=')
     token_hash = sha256(raw_token)
     # store a naive UTC datetime in DB to avoid timezone conversion ambiguities in the DB driver
     expires_at = (now_utc() + timedelta(seconds=settings.launch_token_ttl_seconds)).replace(tzinfo=None)
@@ -351,6 +379,62 @@ def integration_launch_info(credentials: HTTPAuthorizationCredentials = Depends(
     if not schema:
         raise HTTPException(status_code=404, detail="Schema not found")
 
+    # try to decode optional overrides that were encoded into the token when it was created
+    overrides = {}
+    try:
+        # base64 decode: add padding if needed
+        pad = '=' * (-len(raw_token) % 4)
+        decoded = _base64.urlsafe_b64decode(raw_token + pad)
+        data = json.loads(decoded)
+        if isinstance(data, dict):
+            o = data.get('ovr')
+            if isinstance(o, dict):
+                overrides = o
+    except Exception:
+        # not a structured token we created — fall back to no overrides
+        overrides = {}
+
+    # render api_endpoint by replacing {placeholders} with overrides if provided
+    api_endpoint = integ.api_endpoint
+    api_headers = integ.api_headers or {}
+    if overrides:
+        template = integ.api_endpoint or ''
+        placeholders = set(re.findall(r'{([^{}]+)}', template))
+        # validate keys again defensively
+        override_keys = set(overrides.keys())
+        allowed_keys = placeholders.union({'api_header'})
+        extra_keys = override_keys.difference(allowed_keys)
+        if extra_keys:
+            raise HTTPException(status_code=400, detail=f"Unknown override keys present in token: {', '.join(sorted(list(extra_keys)))}")
+        missing = placeholders.difference(override_keys - {'api_header'})
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Missing override values for placeholders: {', '.join(sorted(list(missing)))}")
+
+        pos_q = template.find('?')
+        def _repl(m):
+            k = m.group(1)
+            v = overrides.get(k)
+            if v is None:
+                raise HTTPException(status_code=400, detail=f"Missing override for '{k}'")
+            s = str(v)
+            # url-encode differently for query vs path parts
+            if pos_q != -1 and m.start() > pos_q:
+                return urllib.parse.quote_plus(s)
+            return urllib.parse.quote(s, safe='')
+
+        api_endpoint = re.sub(r'{([^{}]+)}', _repl, template)
+
+        # headers: override entirely if api_header provided in overrides
+        if 'api_header' in overrides and overrides.get('api_header') is not None:
+            hdrs = overrides.get('api_header')
+            if not isinstance(hdrs, dict):
+                raise HTTPException(status_code=400, detail="api_header override must be an object of string->string")
+            # validate header values are strings
+            for hk, hv in hdrs.items():
+                if not isinstance(hv, str):
+                    raise HTTPException(status_code=400, detail=f"Header value for '{hk}' must be a string")
+            api_headers = hdrs
+
     # atomically increment integration usage and mark token used in the same transaction
     stmt = update(Integration).where(Integration.id == integ.id).values(usage=Integration.usage + 1)
     db.execute(stmt)
@@ -366,8 +450,8 @@ def integration_launch_info(credentials: HTTPAuthorizationCredentials = Depends(
         },
         app_name=cred.app_name,
         theme=cred.theme,
-        api_endpoint=integ.api_endpoint,
-        api_headers=integ.api_headers,
+        api_endpoint=api_endpoint,
+        api_headers=api_headers,
         method=integ.method,
         behavior=integ.behavior,
         redirect_url=integ.redirect_url,
