@@ -9,6 +9,8 @@ from app.services.billing import status_description
 from app.core.config import settings
 from uuid import UUID
 from app.schemas.subscription import PlansResponse, CheckoutResponse, PortalResponse, SubscriptionRead
+from app.core.security import now_utc
+from datetime import timedelta
 
 router = APIRouter(prefix="/accounts/{account_id}/subscriptions", tags=["subscriptions"])
 
@@ -33,6 +35,26 @@ def create_checkout(
     success_url = settings.app_base_url + "/billing/success"
     cancel_url = settings.app_base_url + "/billing/cancel"
     session = create_checkout_session(user.email, plan_key, success_url, cancel_url, account_id)
+    # create or update a local subscription record representing the 14-day trial
+    from app.models.subscription import Subscription as SubModel
+    trial_end = now_utc() + timedelta(days=14)
+    rec = db.query(SubModel).filter(SubModel.account_id == account_id).first()
+    if not rec:
+        rec = SubModel(
+            account_id=account_id,
+            plan=plan_key,
+            status='active',
+            current_period_end=trial_end,
+            trial_ends_at=trial_end,
+        )
+        db.add(rec)
+    else:
+        rec.plan = plan_key
+        rec.status = 'active'
+        rec.current_period_end = trial_end
+        rec.trial_ends_at = trial_end
+    db.commit()
+
     return {"checkout_session_id": session.id, "url": session.url}
 
 

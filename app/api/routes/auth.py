@@ -382,21 +382,43 @@ def me(user = Depends(current_user), db: Session = Depends(get_db)):
             raw = getattr(rec, 'raw_stripe_status', None)
             status = canonicalize_status(raw or rec.status)
             current_period_end = ensure_aware(rec.current_period_end)
+            # lazy-cancel subscriptions whose trial ended: if trial_ends_at passed and status still active, mark canceled
+            try:
+                trial_end = getattr(rec, 'trial_ends_at', None)
+                if trial_end is not None and ensure_aware(trial_end) <= now_utc() and (raw or rec.status) == 'active':
+                    rec.status = 'canceled'
+                    db.add(rec)
+                    db.commit()
+                    status = 'canceled'
+            except Exception:
+                # ignore errors in lazy cancel logic
+                pass
 
     # Compute is_subscribed: True iff plan == 'PRO' AND status == 'active' AND current_period_end not passed
     from app.core.security import now_utc
     is_subscribed = False
     # normalize plan casing and compare canonical status
     plan_key = plan.upper() if isinstance(plan, str) else None
-    if plan_key == "PRO" and status == "active":
-        # If current_period_end is None treat as active indefinite; otherwise ensure it's in the future
-        if current_period_end is None:
-            is_subscribed = True
-        else:
-            try:
-                is_subscribed = current_period_end > now_utc()
-            except Exception:
-                is_subscribed = False
+    if plan_key == "PRO":
+        # treat active status as subscribed when within current_period_end
+        if status == 'active':
+            if current_period_end is None:
+                is_subscribed = True
+            else:
+                try:
+                    is_subscribed = current_period_end > now_utc()
+                except Exception:
+                    is_subscribed = False
+        # also treat an ongoing trial as subscribed
+        elif status != 'active':
+            # check trial_ends_at explicitly
+            if account_id and 'rec' in locals():
+                try:
+                    trial_end = getattr(rec, 'trial_ends_at', None)
+                    if trial_end is not None and ensure_aware(trial_end) > now_utc():
+                        is_subscribed = True
+                except Exception:
+                    pass
 
     # Return Me DTO with memberships and subscription flag
     return Me(

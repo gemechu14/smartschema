@@ -24,5 +24,6 @@ class Subscription(Base):
     raw_stripe_status = Column(String(64), nullable=True)  # exact Stripe status value for audit
     last_stripe_event_id = Column(String(255), nullable=True, unique=False)
     current_period_end = Column(DateTime(timezone=True), nullable=True)
+    trial_ends_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
