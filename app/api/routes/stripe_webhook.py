@@ -99,6 +99,14 @@ async def webhook(request: Request):
                             except Exception:
                                 # fallback to attribute access
                                 cpe_ts = getattr(sub_obj, "current_period_end", None)
+                            # Also attempt to read trial_end (if Stripe provided a trial)
+                            try:
+                                trial_ts = sub_obj.get("trial_end")
+                            except Exception:
+                                trial_ts = getattr(sub_obj, "trial_end", None)
+                            except Exception:
+                                # fallback to attribute access
+                                cpe_ts = getattr(sub_obj, "current_period_end", None)
                             # Some Stripe responses put current_period_end on the subscription items
                             if not cpe_ts:
                                 try:
@@ -125,6 +133,11 @@ async def webhook(request: Request):
                     cpe = datetime.utcfromtimestamp(int(cpe_ts)) if cpe_ts else None
                 except Exception:
                     cpe = None
+                trial_dt = None
+                try:
+                    trial_dt = datetime.utcfromtimestamp(int(trial_ts)) if ("trial_ts" in locals() and trial_ts) else None
+                except Exception:
+                    trial_dt = None
                 if not rec:
                     rec = Subscription(
                         account_id=account_id,
@@ -134,6 +147,7 @@ async def webhook(request: Request):
                         status=canonicalize_status("active"),
                         raw_stripe_status="active",
                         current_period_end=cpe,
+                        trial_ends_at=trial_dt,
                     )
                     db.add(rec)
                 else:
@@ -143,6 +157,9 @@ async def webhook(request: Request):
                     rec.raw_stripe_status = "active"
                     rec.status = canonicalize_status("active")
                     rec.current_period_end = cpe
+                    # update local trial_ends_at if Stripe provided a trial_end
+                    if trial_dt:
+                        rec.trial_ends_at = trial_dt
                 if ev_id:
                     rec.last_stripe_event_id = ev_id
                 db.commit()
@@ -155,6 +172,8 @@ async def webhook(request: Request):
                 if rec:
                     # Stripe provides current_period_end as a timestamp
                     cpe = sub.get("current_period_end")
+                    # also check for trial_end on subscription updates
+                    trial_ts = sub.get("trial_end")
                     # If cpe missing in the event, try fetching full subscription from Stripe
                     if not cpe:
                         try:
@@ -164,6 +183,11 @@ async def webhook(request: Request):
                                     cpe = fetched.get("current_period_end")
                                 except Exception:
                                     cpe = getattr(fetched, "current_period_end", None)
+                                # attempt to read trial_end from fetched subscription
+                                try:
+                                    fetched_trial = fetched.get("trial_end")
+                                except Exception:
+                                    fetched_trial = getattr(fetched, "trial_end", None)
                                 # inspect items if still missing
                                 if not cpe:
                                     try:
@@ -187,6 +211,13 @@ async def webhook(request: Request):
                         rec.current_period_end = datetime.utcfromtimestamp(int(cpe)) if cpe else None
                     except Exception:
                         rec.current_period_end = None
+                    # set or clear trial_ends_at from event or fetched subscription
+                    try:
+                        trial_val = trial_ts or (fetched_trial if 'fetched_trial' in locals() else None)
+                        rec.trial_ends_at = datetime.utcfromtimestamp(int(trial_val)) if trial_val else None
+                    except Exception:
+                        # leave existing value untouched on parse failure
+                        pass
                     # store raw stripe status and map to canonical
                     raw = sub.get("status")
                     rec.raw_stripe_status = raw or rec.raw_stripe_status
@@ -234,6 +265,8 @@ async def webhook(request: Request):
                     # mark canceled; attempt to preserve current_period_end if available on the event or via fetch
                     rec.status = "canceled"
                     cpe = obj.get("current_period_end") or obj.get("ended_at")
+                    # if Stripe provided trial_end on deletion event, capture it as well
+                    trial_ts = obj.get("trial_end")
                     if not cpe:
                         try:
                             fetched = retrieve_subscription(stripe_subscription_id=sub_id)
@@ -242,6 +275,11 @@ async def webhook(request: Request):
                                     cpe = fetched.get("current_period_end")
                                 except Exception:
                                     cpe = getattr(fetched, "current_period_end", None)
+                                # try to read trial_end from fetched subscription
+                                try:
+                                    fetched_trial = fetched.get("trial_end")
+                                except Exception:
+                                    fetched_trial = getattr(fetched, "trial_end", None)
                                 if not cpe:
                                     try:
                                         items = fetched.get("items", {}).get("data", [])

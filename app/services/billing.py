@@ -56,6 +56,10 @@ def create_checkout_session(customer_email: str, plan_key: str, success_url: str
             mode="subscription",
             customer_email=customer_email,
             line_items=[{"price": price_id, "quantity": 1}],
+            # Request a 14-day trial period on the subscription created by Checkout.
+            # Stripe will set `trial_end` on the created subscription and emit webhook events
+            # which our webhook handler should use to populate the local `trial_ends_at`.
+            subscription_data={"trial_period_days": 14},
             success_url=success_url,
             cancel_url=cancel_url,
             metadata={"account_id": str(account_id)},
