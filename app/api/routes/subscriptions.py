@@ -123,12 +123,34 @@ def get_subscription(account_id: UUID, db: Session = Depends(get_db), tup = Depe
         "priority_support": True if rec.plan == "PRO" else False,
     }
 
+    # Detect in-trial state (active subscription with a future trial_ends_at)
+    on_trial = False
+    try:
+        on_trial = bool(rec.status and rec.status.lower() == "active" and rec.trial_ends_at and rec.trial_ends_at > now_utc())
+    except Exception:
+        on_trial = False
+
+    if on_trial:
+        # Human-friendly end date for display (e.g., "Nov 26, 2025")
+        try:
+            end_display = rec.trial_ends_at.strftime("%b %d, %Y")
+        except Exception:
+            end_display = str(rec.trial_ends_at)
+        display_status = f"Trial — Ends {end_display}"
+        status_description_text = (
+            f"You're on a 14‑day free trial that ends on {end_display}. "
+            "We'll bill your saved payment method on file when the trial ends."
+        )
+    else:
+        display_status = (rec.status.capitalize() if rec.status else "Unknown")
+        status_description_text = status_description(rec.status or "unknown")
+
     return {
         "plan": rec.plan,
         "status": rec.status,
         "current_period_end": rec.current_period_end,
-        "display_status": (rec.status.capitalize() if rec.status else "Unknown"),
-        "status_description": status_description(rec.status or "unknown"),
+        "display_status": display_status,
+        "status_description": status_description_text,
         "limits": plan_meta.get("limits"),
         "features": features,
     }
