@@ -17,21 +17,35 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # Drop column only if it exists
-    op.execute('ALTER TABLE launch_tokens DROP COLUMN IF EXISTS passthrough')
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
 
-    # Add new column for free trial
-    op.add_column(
-        "subscriptions",
-        sa.Column("trial_ends_at", sa.DateTime(timezone=True), nullable=True),
-    )
+    # Drop passthrough only if it exists
+    columns_launch = {c["name"] for c in insp.get_columns("launch_tokens")}
+    if "passthrough" in columns_launch:
+        op.drop_column("launch_tokens", "passthrough")
+
+    # Add trial_ends_at only if it does NOT exist
+    columns_subs = {c["name"] for c in insp.get_columns("subscriptions")}
+    if "trial_ends_at" not in columns_subs:
+        op.add_column(
+            "subscriptions",
+            sa.Column("trial_ends_at", sa.DateTime(timezone=True), nullable=True),
+        )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_column("subscriptions", "trial_ends_at")
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
 
-    # Recreate passthrough column only if missing
-    op.execute(
-        "ALTER TABLE launch_tokens ADD COLUMN IF NOT EXISTS passthrough TEXT"
-    )
+    columns_subs = {c["name"] for c in insp.get_columns("subscriptions")}
+    if "trial_ends_at" in columns_subs:
+        op.drop_column("subscriptions", "trial_ends_at")
+
+    columns_launch = {c["name"] for c in insp.get_columns("launch_tokens")}
+    if "passthrough" not in columns_launch:
+        op.add_column(
+            "launch_tokens",
+            sa.Column("passthrough", sa.TEXT(), autoincrement=False, nullable=True),
+        )
