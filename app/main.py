@@ -12,6 +12,7 @@ from app.api.routes.public_plans import router as public_plans_router
 from app.api.routes.integrations import router as integrations_router
 from app.api.routes.mapper import router as mapper_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.contact import router as contact_router
 
 app = FastAPI(title=settings.app_name)
 
@@ -34,6 +35,7 @@ app.include_router(public_plans_router)
 app.include_router(integrations_router)
 app.include_router(mapper_router)
 app.include_router(dashboard_router)
+app.include_router(contact_router)
 
 @app.get("/health")
 def health():

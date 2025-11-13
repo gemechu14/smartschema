@@ -142,3 +142,12 @@ class SchemaOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
+class ContactBody(BaseModel):
+    full_name: NameStr = Field(..., description="Full name of the sender")
+    work_email: EmailStr = Field(..., description="Work email address to reply to")
+    company: Optional[str] = Field(None, description="Company name")
+    team_size: Optional[str] = Field(None, description="Team size or 'Select size' value")
+    use_case: Optional[str] = Field(None, description="Short description of intended use case")
+    additional_info: Optional[str] = Field(None, description="Longer free-text message or requirements")
+
+
