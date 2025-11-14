@@ -14,7 +14,12 @@ from app.api.routes.mapper import router as mapper_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.contact import router as contact_router
 
-app = FastAPI(title=settings.app_name)
+app = FastAPI(
+    title=settings.app_name,
+    docs_url="/gibberish-xyz-123",             # new Swagger UI path
+    redoc_url=None,                            # disable ReDoc if you don't need it
+    openapi_url="/gibberish-xyz-123/openapi.json"  # OpenAPI JSON path
+)
 
 # CORS (open for now; tighten to specific origins later)
 app.add_middleware(
