@@ -15,7 +15,7 @@ PLANS = {
         "id": "free",
         "name": "Free",
         "price": 0,
-        "import_formats": ["csv", "excel", "json"],
+        "import_formats": ["csv", "excel"],
         "limits": {
             "rows": 1000,
             "schemas": 5,
@@ -25,8 +25,8 @@ PLANS = {
     "PRO": {
         "id": "pro",
         "name": "Pro",
-        "price": 19900,  # in cents
-        "import_formats": ["csv", "excel", "json"],
+        "price": 39900,  # in cents
+        "import_formats": ["csv", "excel"],
         "limits": {
             "rows": None,
             "schemas": None,
