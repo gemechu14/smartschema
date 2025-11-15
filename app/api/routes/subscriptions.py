@@ -43,14 +43,15 @@ def create_checkout(
         rec = SubModel(
             account_id=account_id,
             plan=plan_key,
-            status='active',
+            # mark pending until Stripe confirms payment/checkout; trial_ends_at still set
+            status='pending',
             current_period_end=trial_end,
             trial_ends_at=trial_end,
         )
         db.add(rec)
     else:
         rec.plan = plan_key
-        rec.status = 'active'
+        rec.status = 'pending'
         rec.current_period_end = trial_end
         rec.trial_ends_at = trial_end
     db.commit()
@@ -123,10 +124,10 @@ def get_subscription(account_id: UUID, db: Session = Depends(get_db), tup = Depe
         "priority_support": True if rec.plan == "PRO" else False,
     }
 
-    # Detect in-trial state (active subscription with a future trial_ends_at)
+    # Detect in-trial state (future trial_ends_at). Treat as trial regardless of local status
     on_trial = False
     try:
-        on_trial = bool(rec.status and rec.status.lower() == "active" and rec.trial_ends_at and rec.trial_ends_at > now_utc())
+        on_trial = bool(rec.trial_ends_at and rec.trial_ends_at > now_utc())
     except Exception:
         on_trial = False
 

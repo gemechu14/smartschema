@@ -257,6 +257,80 @@ async def webhook(request: Request):
                     if ev_id:
                         rec.last_stripe_event_id = ev_id
                     db.commit()
+        elif type == "setup_intent.setup_failed":
+            # SetupIntent failed (often during collecting/attaching a payment method)
+            si = obj
+            # try to resolve a related subscription via customer
+            customer = si.get("customer") or si.get("metadata", {}).get("customer")
+            updated = False
+            if customer:
+                sub_obj = retrieve_subscription(stripe_customer_id=customer)
+                if sub_obj:
+                    sub_id = None
+                    try:
+                        sub_id = sub_obj.get("id")
+                    except Exception:
+                        sub_id = getattr(sub_obj, "id", None)
+                    if sub_id:
+                        rec = db.query(Subscription).filter(Subscription.stripe_subscription_id == sub_id).first()
+                        if rec:
+                            rec.raw_stripe_status = "incomplete"
+                            rec.status = canonicalize_status("incomplete")
+                            if ev_id:
+                                rec.last_stripe_event_id = ev_id
+                            db.commit()
+                            updated = True
+            if not updated:
+                # fallback: if metadata contains account_id try to mark that account subscription
+                acct = si.get("metadata", {}).get("account_id")
+                if acct:
+                    rec = db.query(Subscription).filter(Subscription.account_id == acct).first()
+                    if rec:
+                        rec.raw_stripe_status = "incomplete"
+                        rec.status = canonicalize_status("incomplete")
+                        if ev_id:
+                            rec.last_stripe_event_id = ev_id
+                        db.commit()
+        elif type == "payment_intent.payment_failed":
+            # Payment failed for a PaymentIntent (could be associated with an invoice/subscription)
+            pi = obj
+            # Try direct subscription id
+            sub_id = pi.get("subscription") or None
+            if not sub_id:
+                # sometimes PaymentIntent links to invoice which links to subscription
+                inv_id = pi.get("invoice")
+                if inv_id:
+                    try:
+                        inv = stripe.Invoice.retrieve(inv_id)
+                        sub_id = inv.get("subscription")
+                    except Exception:
+                        sub_id = None
+            if sub_id:
+                rec = db.query(Subscription).filter(Subscription.stripe_subscription_id == sub_id).first()
+                if rec:
+                    rec.raw_stripe_status = "past_due"
+                    rec.status = canonicalize_status("past_due")
+                    if ev_id:
+                        rec.last_stripe_event_id = ev_id
+                    db.commit()
+            else:
+                # fallback: try resolving by customer
+                customer = pi.get("customer")
+                if customer:
+                    sub_obj = retrieve_subscription(stripe_customer_id=customer)
+                    if sub_obj:
+                        try:
+                            sid = sub_obj.get("id")
+                        except Exception:
+                            sid = getattr(sub_obj, "id", None)
+                        if sid:
+                            rec = db.query(Subscription).filter(Subscription.stripe_subscription_id == sid).first()
+                            if rec:
+                                rec.raw_stripe_status = "past_due"
+                                rec.status = canonicalize_status("past_due")
+                                if ev_id:
+                                    rec.last_stripe_event_id = ev_id
+                                db.commit()
         elif type == "customer.subscription.deleted":
             sub_id = obj.get("id")
             if sub_id:
