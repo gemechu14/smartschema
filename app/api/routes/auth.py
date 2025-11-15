@@ -409,8 +409,8 @@ def me(user = Depends(current_user), db: Session = Depends(get_db)):
                     is_subscribed = current_period_end > now_utc()
                 except Exception:
                     is_subscribed = False
-        # also treat an ongoing trial as subscribed
-        elif status != 'active':
+        # also treat an ongoing trial as subscribed — but not an optimistic `pending` record
+        elif status != 'active' and status != 'pending':
             # check trial_ends_at explicitly
             if account_id and 'rec' in locals():
                 try:
