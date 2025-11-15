@@ -41,14 +41,38 @@ def issue_tokens(db: Session, user: User, account_id: UUID, user_agent: str = ""
     jti = str(uuid4())
     access = make_access_token(str(user.id), str(account_id), _get_role(db, user.id, account_id).value)
     refresh = make_refresh_token(str(user.id), str(account_id), jti)
-    rt = RefreshToken(
-        user_id=user.id, account_id=account_id, jti=jti,
-        token_hash=sha256(refresh),
-        user_agent=user_agent[:255] if user_agent else None,
-        ip=ip[:64] if ip else None,
-        expires_at=now_utc() + timedelta(days=settings.refresh_ttl_days),
+
+    # Reuse an existing active refresh-token row if present to avoid DB churn.
+    expires = now_utc() + timedelta(days=settings.refresh_ttl_days)
+    existing = (
+        db.query(RefreshToken)
+        .filter(
+            RefreshToken.user_id == user.id,
+            RefreshToken.account_id == account_id,
+            RefreshToken.revoked_at.is_(None),
+        )
+        .order_by(RefreshToken.expires_at.desc())
+        .first()
     )
-    db.add(rt); db.commit()
+
+    if existing:
+        existing.jti = jti
+        existing.token_hash = sha256(refresh)
+        existing.user_agent = user_agent[:255] if user_agent else None
+        existing.ip = ip[:64] if ip else None
+        existing.expires_at = expires
+        db.add(existing)
+        db.commit()
+    else:
+        rt = RefreshToken(
+            user_id=user.id, account_id=account_id, jti=jti,
+            token_hash=sha256(refresh),
+            user_agent=user_agent[:255] if user_agent else None,
+            ip=ip[:64] if ip else None,
+            expires_at=expires,
+        )
+        db.add(rt); db.commit()
+
     return TokenPair(access_token=access, refresh_token=refresh)
 
 def _get_role(db: Session, user_id: UUID, account_id: UUID) -> Role:
