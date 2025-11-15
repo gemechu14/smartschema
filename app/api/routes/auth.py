@@ -324,20 +324,28 @@ def refresh_token(request: Request, refresh_token: str, db: Session = Depends(ge
         raise HTTPException(401, "Invalid refresh token")
 
     # verify stored hash exists and not revoked/expired
-    rt = db.query(RefreshToken).filter(RefreshToken.jti==jti, RefreshToken.token_hash==sha256(refresh_token)).first()
+    rt = db.query(RefreshToken).filter(RefreshToken.jti == jti, RefreshToken.token_hash == sha256(refresh_token)).first()
     if not rt or rt.revoked_at is not None or ensure_aware(rt.expires_at) < now_utc():
         raise HTTPException(401, "Refresh token invalid/revoked")
 
-    # rotate: revoke old, create new
-    rt.revoked_at = now_utc()
+    # rotate existing refresh-token row in-place to avoid creating a new DB row
     user = db.get(User, UUID(sub))
     if not user or not user.is_active:
         raise HTTPException(401, "Invalid user")
+
+    new_jti = str(uuid4())
+    new_refresh = make_refresh_token(str(user.id), str(aid), new_jti)
+    rt.jti = new_jti
+    rt.token_hash = sha256(new_refresh)
+    rt.user_agent = request.headers.get("user-agent", "")[:255] if request.headers.get("user-agent") else None
+    rt.ip = request.client.host if request.client else None
+    rt.expires_at = now_utc() + timedelta(days=settings.refresh_ttl_days)
+    # keep revoked_at as None (still active) — rotation overwrites token in place
+    db.add(rt)
     db.commit()
 
-    return issue_tokens(db, user, UUID(aid),
-                        user_agent=request.headers.get("user-agent", ""),
-                        ip=request.client.host if request.client else "")
+    access = make_access_token(str(user.id), str(aid), _get_role(db, user.id, UUID(aid)).value)
+    return TokenPair(access_token=access, refresh_token=new_refresh)
 
 @router.post("/logout")
 def logout(refresh_token: str, db: Session = Depends(get_db)):
