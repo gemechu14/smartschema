@@ -24,7 +24,7 @@ app = FastAPI(
 # CORS (open for now; tighten to specific origins later)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://app.locimapper.com", "https://www.app.locimapper.com", "http://localhost:3000","https://locimapper.com", "https://www.locimapper.com"],              # e.g., ["http://localhost:3000", "https://your-frontend.com"]
+    allow_origins=["https://app.smartschema.io", "https://www.app.smartschema.io", "http://localhost:3000","https://smartschema.io", "https://www.smartschema.io"],              # e.g., ["http://localhost:3000", "https://your-frontend.com"]
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -9,9 +9,9 @@ router = APIRouter()
 def contact_us(body: ContactBody):
     """Public contact endpoint. No authentication required.
 
-    Sends a formatted email to admin@locimapper.com with the provided fields.
+    Sends a formatted email to admin@smartschema.io with the provided fields.
     """
-    admin_email = "admin@locimapper.com"
+    admin_email = "admin@smartschema.io"
     subject = f"New contact form submission from {body.full_name}"
     # Build a simple HTML body
     html = f"""<!doctype html>

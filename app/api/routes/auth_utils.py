@@ -25,7 +25,7 @@ def issue_email_verification(db: Session, user_id, to_email: str, first_name: st
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Welcome to LociMapper</title>
+    <title>Welcome to SmartSchema</title>
     <style>
         body {{ font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f6f8fb; margin: 0; padding: 0; color: #333; }}
         .container {{ max-width: 600px; margin: 40px auto; background-color: #fff; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
@@ -40,18 +40,18 @@ def issue_email_verification(db: Session, user_id, to_email: str, first_name: st
 <body>
     <div class="container">
         <div class="header">
-            <h1>Welcome to LociMapper</h1>
+            <h1>Welcome to SmartSchema</h1>
         </div>
         <div class="content">
             <h3>Hello {name},</h3>
-            <p>Welcome to <strong>LociMapper</strong> — your trusted platform for seamless data mapping and validation. To complete your signup, please verify your email address below:</p>
+            <p>Welcome to <strong>SmartSchema</strong> — your trusted platform for seamless data mapping and validation. To complete your signup, please verify your email address below:</p>
             <p style="text-align:left;"><a class="btn" href="{link}" style="color:#ffffff !important; text-decoration:none;">Verify My Email</a></p>
             <p>If the button doesn't work, copy and paste this URL into your browser:<br><a href="{link}">{link}</a></p>
-            <p>If you didn’t sign up for LociMapper, simply ignore this message.</p>
-            <p>Cheers,<br>The LociMapper Team</p>
+            <p>If you didn’t sign up for SmartSchema, simply ignore this message.</p>
+            <p>Cheers,<br>The SmartSchema Team</p>
         </div>
         <div class="footer">
-            &copy; {__import__('datetime').datetime.utcnow().year} LociMapper. All rights reserved.
+            &copy; {__import__('datetime').datetime.utcnow().year} SmartSchema. All rights reserved.
         </div>
     </div>
 </body>
@@ -104,7 +104,7 @@ def issue_password_reset(db: Session, user_id, to_email: str, first_name: str | 
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Password Changed Successfully - LociMapper</title>
+    <title>Password Changed Successfully - SmartSchema</title>
     <style>
         body {{ font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f6f8fb; margin: 0; padding: 0; color: #333; }}
         .container {{ max-width: 600px; margin: 40px auto; background-color: #fff; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
@@ -117,18 +117,18 @@ def issue_password_reset(db: Session, user_id, to_email: str, first_name: str | 
 <body>
     <div class="container">
         <div class="header">
-            <h2>LociMapper</h2>
+            <h2>SmartSchema</h2>
         </div>
         <div class="content">
             <h3>Reset Your Password</h3>
             <p>Hello {name},</p>
-            <p>We received a request to reset your password for your <strong>LociMapper</strong> account. You can set a new password by clicking the button below:</p>
+            <p>We received a request to reset your password for your <strong>SmartSchema</strong> account. You can set a new password by clicking the button below:</p>
             <p><a class="btn" href="{link}" style="color:#ffffff !important; text-decoration:none; display:inline-block;">Reset Password</a></p>
             <p>This link will expire in <strong>{hours} hours</strong>. If you didn’t request a password reset, you can safely ignore this message.</p>
-            <p>Stay secure,<br>The LociMapper Team</p>
+            <p>Stay secure,<br>The SmartSchema Team</p>
         </div>
         <div class="footer">
-            &copy; {__import__('datetime').datetime.utcnow().year} LociMapper. All rights reserved.
+            &copy; {__import__('datetime').datetime.utcnow().year} SmartSchema. All rights reserved.
         </div>
     </div>
 </body>
