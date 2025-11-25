@@ -451,6 +451,20 @@ def me(user = Depends(current_user), db: Session = Depends(get_db)):
                         is_subscribed = True
                 except Exception:
                     pass
+    # Testing override: treat accounts owned by specific emails as subscribed
+    try:
+        if account_id:
+            acct = db.get(Account, account_id)
+            if acct and acct.owner_user_id:
+                owner = db.get(User, acct.owner_user_id)
+                if owner and owner.email and owner.email.lower().strip() in {
+                    "elshadayrn13@gmail.com",
+                    "adoniasjunk@gmail.com",
+                }:
+                    is_subscribed = True
+    except Exception:
+        # best-effort only for testing; ignore any DB lookup errors
+        pass
 
     # Return Me DTO with memberships and subscription flag
     return Me(
