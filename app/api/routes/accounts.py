@@ -272,7 +272,7 @@ def delete_user_and_cleanup(
 # ---------- INVITE ----------
 @router.post(
     "/{account_id}/invite",
-    summary="Invite a member (Owner only)",
+    summary="Invite a member (Owner/Admin)",
     description="""
 Sends an invitation email to join this account as the specified role.  
 If `manage_schema_ids` is provided, those schema permissions are pre-applied on acceptance.  
@@ -282,7 +282,7 @@ Admins/Owners ignore per-schema restrictions.
 def invite_member(
     account_id: UUID,
     body: InviteMemberBody,
-    tup = Depends(require_role_for_account({Role.OWNER})),
+    tup = Depends(require_role_for_account({Role.OWNER, Role.ADMIN})),
     db: Session = Depends(get_db),
 ):
     # --- normalize and validate manage_schema_ids (List[UUID] -> List[str]) ---
