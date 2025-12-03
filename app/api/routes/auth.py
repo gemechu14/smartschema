@@ -460,6 +460,7 @@ def me(user = Depends(current_user), db: Session = Depends(get_db)):
                 if owner and owner.email and owner.email.lower().strip() in {
                     "elshadayrn13@gmail.com",
                     "adoniasjunk@gmail.com",
+                    "ramatinsae@gmail.com",
                 }:
                     is_subscribed = True
     except Exception:
