@@ -135,6 +135,7 @@ Sends a verification email. Login is blocked until verified.
 )
 def signup(body: SignupBody, db: Session = Depends(get_db)):
     email = body.email.lower().strip()
+    print("This is a simple print statement for debugging")
 
     # Unique username/email
     if db.query(User).filter(User.email == email).first():
@@ -147,7 +148,7 @@ def signup(body: SignupBody, db: Session = Depends(get_db)):
         fn, ln = parse_name_from_email(email)
         first_name = first_name or fn
         last_name = last_name or ln
-
+    
     # Create user
     user = User(
         email=email,
@@ -461,6 +462,7 @@ def me(user = Depends(current_user), db: Session = Depends(get_db)):
                     "elshadayrn13@gmail.com",
                     "adoniasjunk@gmail.com",
                     "ramatinsae@gmail.com",
+                    "gammeeb867@gmail.com"
                 }:
                     is_subscribed = True
     except Exception:

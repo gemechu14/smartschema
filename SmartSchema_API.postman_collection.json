@@ -1,0 +1,1333 @@
+{
+	"info": {
+		"_postman_id": "smartschema-api-collection",
+		"name": "SmartSchema API",
+		"description": "Complete API collection for SmartSchema Backend - Authentication, Accounts, Schemas, Subscriptions, Integrations, and more",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Signup",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"securepassword123\",\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\",\n  \"invite\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/signup",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "signup"]
+						},
+						"description": "Create a new user account. If invite token is provided, joins that account. Otherwise creates a new account with OWNER role."
+					},
+					"response": []
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set(\"access_token\", jsonData.access_token);",
+									"    pm.environment.set(\"refresh_token\", jsonData.refresh_token);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"securepassword123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "login"]
+						},
+						"description": "Authenticate user and receive access/refresh tokens. Tokens are automatically saved to environment."
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set(\"access_token\", jsonData.access_token);",
+									"    pm.environment.set(\"refresh_token\", jsonData.refresh_token);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/refresh?refresh_token={{refresh_token}}",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "refresh"],
+							"query": [
+								{
+									"key": "refresh_token",
+									"value": "{{refresh_token}}"
+								}
+							]
+						},
+						"description": "Refresh access token using refresh token. New tokens are automatically saved."
+					},
+					"response": []
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/logout?refresh_token={{refresh_token}}",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "logout"],
+							"query": [
+								{
+									"key": "refresh_token",
+									"value": "{{refresh_token}}"
+								}
+							]
+						},
+						"description": "Revoke refresh token to logout user."
+					},
+					"response": []
+				},
+				{
+					"name": "Verify Email",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/auth/verify?token=VERIFICATION_TOKEN_HERE",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "verify"],
+							"query": [
+								{
+									"key": "token",
+									"value": "VERIFICATION_TOKEN_HERE",
+									"description": "Token from verification email"
+								}
+							]
+						},
+						"description": "Verify email address using token from verification email."
+					},
+					"response": []
+				},
+				{
+					"name": "Resend Verification",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/verify/resend",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "verify", "resend"]
+						},
+						"description": "Resend verification email. Rate-limited with cooldown period."
+					},
+					"response": []
+				},
+				{
+					"name": "Google OAuth Start",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/auth/google/start",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "google", "start"]
+						},
+						"description": "Get Google OAuth authorization URL. Redirect user to auth_url."
+					},
+					"response": []
+				},
+				{
+					"name": "Google OAuth Callback",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/auth/google/callback?code=AUTHORIZATION_CODE",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "google", "callback"],
+							"query": [
+								{
+									"key": "code",
+									"value": "AUTHORIZATION_CODE",
+									"description": "Authorization code from Google"
+								}
+							]
+						},
+						"description": "Exchange Google OAuth code for tokens. Returns TokenPair."
+					},
+					"response": []
+				},
+				{
+					"name": "Password Forgot",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/password/forgot",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "password", "forgot"]
+						},
+						"description": "Request password reset email."
+					},
+					"response": []
+				},
+				{
+					"name": "Password Reset",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"RESET_TOKEN_FROM_EMAIL\",\n  \"new_password\": \"newsecurepassword123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/password/reset",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "password", "reset"]
+						},
+						"description": "Reset password using token from email."
+					},
+					"response": []
+				},
+				{
+					"name": "Change Password",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"current_password\": \"oldpassword123\",\n  \"new_password\": \"newpassword123\",\n  \"confirm_new_password\": \"newpassword123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/change-password",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "change-password"]
+						},
+						"description": "Change password for authenticated user. Revokes all refresh tokens."
+					},
+					"response": []
+				},
+				{
+					"name": "Change Name",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"first_name\": \"Jane\",\n  \"last_name\": \"Smith\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/change-name",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "change-name"]
+						},
+						"description": "Update user's first and/or last name."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Me",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/auth/me",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "me"]
+						},
+						"description": "Get current authenticated user profile with memberships and subscription status."
+					},
+					"response": []
+				}
+			],
+			"description": "Authentication endpoints for user signup, login, token management, and profile updates."
+		},
+		{
+			"name": "Accounts",
+			"item": [
+				{
+					"name": "Get Account",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}"],
+							"variable": [
+								{
+									"key": "account_id",
+									"value": "ACCOUNT_UUID_HERE"
+								}
+							]
+						},
+						"description": "Get account details. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "List Team Members",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/team_members",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "team_members"]
+						},
+						"description": "List active members and pending invites. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "Invite Member",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"newmember@example.com\",\n  \"role\": \"MEMBER\",\n  \"manage_schema_ids\": []\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/invite",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "invite"]
+						},
+						"description": "Send invitation to join account. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "Preview Invite",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/invites/{{invite_token}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "invites", "{{invite_token}}"],
+							"variable": [
+								{
+									"key": "invite_token",
+									"value": "INVITE_TOKEN_HERE"
+								}
+							]
+						},
+						"description": "Preview invite details (public endpoint)."
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Member",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/members/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "members", "{{user_id}}"],
+							"variable": [
+								{
+									"key": "user_id",
+									"value": "USER_UUID_HERE"
+								}
+							]
+						},
+						"description": "Remove member from account. Owner only. Cannot remove last OWNER."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete User",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/users",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "users"]
+						},
+						"description": "Delete user and cleanup related records. Owner/Admin only. Cannot delete account owner."
+					},
+					"response": []
+				},
+				{
+					"name": "Rename Account",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"New Account Name\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}"]
+						},
+						"description": "Rename account. Owner only."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Member Permissions",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"USER_UUID_HERE\",\n  \"role\": \"MEMBER\",\n  \"manage_schema_ids\": [\"SCHEMA_UUID_1\", \"SCHEMA_UUID_2\"]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/members/permissions",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "members", "permissions"]
+						},
+						"description": "Update member role and schema permissions. Can use user_id or email. Owner/Admin only."
+					},
+					"response": []
+				}
+			],
+			"description": "Account management endpoints for team members, invitations, and permissions."
+		},
+		{
+			"name": "Schemas",
+			"item": [
+				{
+					"name": "Create Schema",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"schema_name\": \"Customer Schema\",\n  \"description\": \"Customer data schema\",\n  \"schema\": {\n    \"columns\": [\n      {\"name\": \"first_name\", \"type\": \"string\"},\n      {\"name\": \"last_name\", \"type\": \"string\"},\n      {\"name\": \"email\", \"type\": \"string\"},\n      {\"name\": \"age\", \"type\": \"integer\"}\n    ]\n  },\n  \"validators\": {\n    \"email\": {\"required\": true, \"format\": \"email\"},\n    \"age\": {\"min\": 0, \"max\": 150}\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/schemas",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "schemas"]
+						},
+						"description": "Create a new schema specification. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "List Schemas",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/schemas",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "schemas"]
+						},
+						"description": "List all schemas for account. Visibility-aware based on role."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Schema",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/schemas/{{schema_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "schemas", "{{schema_id}}"],
+							"variable": [
+								{
+									"key": "schema_id",
+									"value": "SCHEMA_UUID_HERE"
+								}
+							]
+						},
+						"description": "Get schema by ID. Visibility-aware based on role."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Schema",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"schema_name\": \"Updated Schema Name\",\n  \"schema\": {\n    \"columns\": [\n      {\"name\": \"first_name\", \"type\": \"string\"},\n      {\"name\": \"email\", \"type\": \"string\"}\n    ]\n  },\n  \"validators\": {\n    \"email\": {\"required\": true}\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/schemas/{{schema_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "schemas", "{{schema_id}}"]
+						},
+						"description": "Update schema. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Schema",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/schemas/{{schema_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "schemas", "{{schema_id}}"]
+						},
+						"description": "Soft-delete schema. Owner/Admin only. Removes from member permissions."
+					},
+					"response": []
+				}
+			],
+			"description": "Schema CRUD operations for managing data schemas."
+		},
+		{
+			"name": "Subscriptions",
+			"item": [
+				{
+					"name": "Get Subscription",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/subscriptions/",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "subscriptions", ""]
+						},
+						"description": "Get current subscription status for account. Owner only."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Checkout",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/subscriptions/checkout",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "subscriptions", "checkout"]
+						},
+						"description": "Create Stripe Checkout session for PRO plan. Owner only."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Portal",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/subscriptions/portal",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "subscriptions", "portal"]
+						},
+						"description": "Create Stripe Billing Portal session. Owner only."
+					},
+					"response": []
+				}
+			],
+			"description": "Subscription and billing management endpoints."
+		},
+		{
+			"name": "Integrations",
+			"item": [
+				{
+					"name": "Create Credential",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"app_name\": \"My Web App\",\n  \"authorized_js_origins\": [\"https://myapp.com\"],\n  \"theme\": {\"primary_color\": \"#0f172a\"},\n  \"client_secret_ttl_days\": 0\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/credentials",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "credentials"]
+						},
+						"description": "Create API credential (client_id/client_secret). Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "List Credentials",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/credentials",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "credentials"]
+						},
+						"description": "List all active credentials for account."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Credential",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"app_name\": \"Updated App Name\",\n  \"authorized_js_origins\": [\"https://myapp.com\", \"https://staging.myapp.com\"]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/credentials/{{credential_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "credentials", "{{credential_id}}"],
+							"variable": [
+								{
+									"key": "credential_id",
+									"value": "CREDENTIAL_UUID_HERE"
+								}
+							]
+						},
+						"description": "Update credential metadata. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "Rotate Credential",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/credentials/{{credential_id}}/rotate",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "credentials", "{{credential_id}}", "rotate"]
+						},
+						"description": "Rotate client_secret. Returns new secret one-time. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Credential",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/credentials/{{credential_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "credentials", "{{credential_id}}"]
+						},
+						"description": "Delete credential and associated integrations. Owner/Admin/Member."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Integration",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Customer Import Integration\",\n  \"description\": \"Import customer data\",\n  \"schema_id\": \"SCHEMA_UUID_HERE\",\n  \"credential_id\": \"CREDENTIAL_UUID_HERE\",\n  \"redirect_url\": \"https://myapp.com/success\",\n  \"api_endpoint\": \"https://api.myapp.com/customers\",\n  \"api_headers\": {\"Authorization\": \"Bearer TOKEN\"},\n  \"method\": \"POST\",\n  \"behavior\": {\"require_all\": true, \"auto_submit\": false}\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/integrations",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "integrations"]
+						},
+						"description": "Create integration mapping schema to API endpoint."
+					},
+					"response": []
+				},
+				{
+					"name": "List Integrations",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/integrations",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "integrations"]
+						},
+						"description": "List integrations for account. Members see only their allowed schemas."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Integration",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Updated Integration Name\",\n  \"active\": true,\n  \"api_endpoint\": \"https://api.myapp.com/v2/customers\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/integrations/{{integration_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "integrations", "{{integration_id}}"],
+							"variable": [
+								{
+									"key": "integration_id",
+									"value": "INTEGRATION_UUID_HERE"
+								}
+							]
+						},
+						"description": "Update integration. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "Increment Usage",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/integrations/{{integration_id}}/usage",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "integrations", "{{integration_id}}", "usage"]
+						},
+						"description": "Increment integration usage counter."
+					},
+					"response": []
+				},
+				{
+					"name": "Launch Integration",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"client_id\": \"CLIENT_ID_HERE\",\n  \"client_secret\": \"CLIENT_SECRET_HERE\",\n  \"integration_id\": \"INTEGRATION_UUID_HERE\",\n  \"overrides\": {\n    \"user_id\": 123,\n    \"api_header\": {\"Content-Type\": \"application/json\"}\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/integrations/launch",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "integrations", "launch"]
+						},
+						"description": "Server-to-server launcher. Returns frontend URL with embedded token."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Launch Info",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{launch_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/integrations/launch/info",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "integrations", "launch", "info"]
+						},
+						"description": "Get integration details using launch token. Token extracted from URL fragment."
+					},
+					"response": []
+				}
+			],
+			"description": "Integration management endpoints for credentials and integrations."
+		},
+		{
+			"name": "Dashboard",
+			"item": [
+				{
+					"name": "Get KPIs",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/dashboard/kpis",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "dashboard", "kpis"]
+						},
+						"description": "Get dashboard KPIs: total schemas, integrations, page requests, credentials."
+					},
+					"response": []
+				}
+			],
+			"description": "Dashboard endpoints for account statistics."
+		},
+		{
+			"name": "Public",
+			"item": [
+				{
+					"name": "List Plans",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/plans",
+							"host": ["{{base_url}}"],
+							"path": ["plans"]
+						},
+						"description": "Public endpoint to list available subscription plans."
+					},
+					"response": []
+				},
+				{
+					"name": "Contact Form",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"full_name\": \"John Doe\",\n  \"work_email\": \"john@example.com\",\n  \"company\": \"Acme Corp\",\n  \"team_size\": \"10-50\",\n  \"use_case\": \"Data import automation\",\n  \"additional_info\": \"Looking for enterprise solution\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/contact",
+							"host": ["{{base_url}}"],
+							"path": ["contact"]
+						},
+						"description": "Public contact form endpoint."
+					},
+					"response": []
+				},
+				{
+					"name": "Loci AI Mapper",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"schema_columns\": [\"first_name\", \"last_name\", \"email\", \"phone\"],\n  \"import_columns\": [\"fname\", \"lname\", \"email_address\", \"mobile\"],\n  \"min_confidence\": 0.50,\n  \"model_name\": \"sentence-transformers/all-MiniLM-L6-v2\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/loci-ai-mapper",
+							"host": ["{{base_url}}"],
+							"path": ["loci-ai-mapper"]
+						},
+						"description": "Map import columns to schema columns using AI embeddings. Public endpoint."
+					},
+					"response": []
+				}
+			],
+			"description": "Public endpoints that don't require authentication."
+		},
+		{
+			"name": "Stripe",
+			"item": [
+				{
+					"name": "Webhook",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "stripe-signature",
+								"value": "STRIPE_SIGNATURE_HERE",
+								"description": "Stripe webhook signature"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"id\": \"evt_1234567890\",\n  \"type\": \"checkout.session.completed\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"cs_test_123\",\n      \"customer\": \"cus_123\",\n      \"subscription\": \"sub_123\",\n      \"metadata\": {\n        \"account_id\": \"ACCOUNT_UUID_HERE\"\n      }\n    }\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/stripe/webhook",
+							"host": ["{{base_url}}"],
+							"path": ["stripe", "webhook"]
+						},
+						"description": "Stripe webhook endpoint for subscription events. Requires Stripe signature header."
+					},
+					"response": []
+				}
+			],
+			"description": "Stripe webhook endpoints."
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "refresh_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "account_id",
+			"value": "",
+			"type": "string"
+		}
+	]
+}
+
+
