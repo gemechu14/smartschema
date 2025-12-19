@@ -14,6 +14,7 @@ from app.models import password_reset
 from app.models import launch_token
 from app.models import subscription
 from app.models import integrations
+from app.models import survey  # noqa
 
 # from app.models import projects  # <- add new modules like this
 

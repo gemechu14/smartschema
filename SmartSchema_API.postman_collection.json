@@ -1252,6 +1252,328 @@
 			"description": "Public endpoints that don't require authentication."
 		},
 		{
+			"name": "Surveys",
+			"item": [
+				{
+					"name": "Create Survey",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const jsonData = pm.response.json();",
+									"    if (jsonData.survey && jsonData.survey.id) {",
+									"        pm.environment.set(\"survey_id\", jsonData.survey.id);",
+									"    }",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Customer Satisfaction Survey\",\n  \"description\": \"Help us improve our service\",\n  \"schema_id\": \"{{schema_id}}\",\n  \"emails\": [\n    \"user1@example.com\",\n    \"user2@example.com\",\n    \"user3@example.com\"\n  ],\n  \"expires_at\": \"2024-12-31T23:59:59Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/surveys",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "surveys"]
+						},
+						"description": "Create a new survey with email invitations. Owner/Admin only. Emails are sent in background. Survey_id is optional."
+					},
+					"response": []
+				},
+				{
+					"name": "List Surveys",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/surveys?status=ACTIVE&skip=0&limit=50",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "surveys"],
+							"query": [
+								{
+									"key": "status",
+									"value": "ACTIVE",
+									"description": "Filter by status (ACTIVE or CLOSED)"
+								},
+								{
+									"key": "skip",
+									"value": "0",
+									"description": "Pagination offset"
+								},
+								{
+									"key": "limit",
+									"value": "50",
+									"description": "Results per page (max 100)"
+								}
+							]
+						},
+						"description": "List all surveys with pagination and statistics. All account members can view."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Survey Details",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/surveys/{{survey_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "surveys", "{{survey_id}}"],
+							"variable": [
+								{
+									"key": "survey_id",
+									"value": "SURVEY_UUID_HERE"
+								}
+							]
+						},
+						"description": "Get full survey details including invite list and statistics. All account members can view."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Survey",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Updated Survey Name\",\n  \"description\": \"Updated description\",\n  \"emails\": [\n    \"newuser@example.com\",\n    \"anotheruser@example.com\"\n  ],\n  \"status\": \"ACTIVE\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/surveys/{{survey_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "surveys", "{{survey_id}}"]
+						},
+						"description": "Update survey metadata and add new invitations. Only NEW emails receive invites. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "Close Survey",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/surveys/{{survey_id}}/close",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "surveys", "{{survey_id}}", "close"]
+						},
+						"description": "Close survey to prevent further submissions. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Survey",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/surveys/{{survey_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "surveys", "{{survey_id}}"]
+						},
+						"description": "Soft-delete survey (sets deleted_at). Owner only. Preserves history."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Survey Responses",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/accounts/{{account_id}}/surveys/{{survey_id}}/responses?skip=0&limit=100",
+							"host": ["{{base_url}}"],
+							"path": ["accounts", "{{account_id}}", "surveys", "{{survey_id}}", "responses"],
+							"query": [
+								{
+									"key": "skip",
+									"value": "0",
+									"description": "Pagination offset"
+								},
+								{
+									"key": "limit",
+									"value": "100",
+									"description": "Results per page (max 1000)"
+								}
+							]
+						},
+						"description": "Get all responses for a survey with pagination. Owner/Admin only."
+					},
+					"response": []
+				},
+				{
+					"name": "Open Survey (Public)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    if (jsonData.survey_id) {",
+									"        pm.environment.set(\"public_survey_id\", jsonData.survey_id);",
+									"    }",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/surveys/open?token={{survey_token}}",
+							"host": ["{{base_url}}"],
+							"path": ["surveys", "open"],
+							"query": [
+								{
+									"key": "token",
+									"value": "{{survey_token}}",
+									"description": "Survey invitation token from email"
+								}
+							]
+						},
+						"description": "Open survey using invitation token. Public endpoint (no auth). Sets opened_at timestamp on first access."
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Survey (Public)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"{{survey_token}}\",\n  \"response_data\": {\n    \"question1\": \"answer1\",\n    \"question2\": \"answer2\",\n    \"rating\": 5,\n    \"feedback\": \"Great service!\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/surveys/submit",
+							"host": ["{{base_url}}"],
+							"path": ["surveys", "submit"]
+						},
+						"description": "Submit survey response. Public endpoint (no auth). Validates against schema if present. Prevents double submission."
+					},
+					"response": []
+				},
+				{
+					"name": "Check Survey Status (Public)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/surveys/status?token={{survey_token}}",
+							"host": ["{{base_url}}"],
+							"path": ["surveys", "status"],
+							"query": [
+								{
+									"key": "token",
+									"value": "{{survey_token}}",
+									"description": "Survey invitation token"
+								}
+							]
+						},
+						"description": "Check survey invitation status without opening it. Public endpoint (no auth)."
+					},
+					"response": []
+				}
+			],
+			"description": "Survey invitation and submission system. Create surveys, send invitations, and collect responses."
+		},
+		{
 			"name": "Stripe",
 			"item": [
 				{
@@ -1326,8 +1648,43 @@
 			"key": "account_id",
 			"value": "",
 			"type": "string"
+		},
+		{
+			"key": "survey_id",
+			"value": "",
+			"type": "string",
+			"description": "Survey UUID (auto-populated after survey creation)"
+		},
+		{
+			"key": "survey_token",
+			"value": "",
+			"type": "string",
+			"description": "Survey invitation token from email"
+		},
+		{
+			"key": "schema_id",
+			"value": "",
+			"type": "string",
+			"description": "Schema UUID (for survey creation)"
 		}
 	]
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

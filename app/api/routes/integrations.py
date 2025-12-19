@@ -300,11 +300,12 @@ def launch_integration_page(body: IntegrationLaunchRequest, db: Session = Depend
     cred = db.query(APICredential).filter(APICredential.client_id == body.client_id, APICredential.revoked == False).first()
     if not cred:
         raise HTTPException(status_code=401, detail="Invalid client credentials")
-
+    # print("dfjdkfjdjkfdkkdfjdkfjdjkfdkk");
+   
     # verify secret (server stores hash)
     if sha256(body.client_secret) != cred.client_secret_hash:
         raise HTTPException(status_code=401, detail="Invalid client credentials")
-
+    print("dfjdkfjdjkfdkkdfjdkfjdjkfdkk");   
     # find integration
     integ = db.get(Integration, body.integration_id)
     if not integ or not integ.active:

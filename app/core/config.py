@@ -33,5 +33,9 @@ class Settings(BaseModel):
     password_reset_exp_hours: int = int(os.getenv("PASSWORD_RESET_EXP_HOURS", "24"))
     # Launch token TTL (seconds) for standalone import page tokens (default 5 minutes)
     launch_token_ttl_seconds: int = int(os.getenv("LAUNCH_TOKEN_TTL_SECONDS", "300"))
+    
+    # Survey settings
+    survey_invite_exp_days: int = int(os.getenv("SURVEY_INVITE_EXP_DAYS", "14"))
+    survey_batch_size: int = int(os.getenv("SURVEY_BATCH_SIZE", "1000"))
 
 settings = Settings()
